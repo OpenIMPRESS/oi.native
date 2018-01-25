@@ -39,7 +39,7 @@ public:
             }
             
             if (sent < runs) {
-                WorkerBufferRef snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_BLOCKING);
+                WorkerBufferRef snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
                 if (snd.worker_buffer) {
                     memcpy((uint8_t *) &(snd.worker_buffer->buffer[0]), &src, sizeof(src));
                     memcpy((uint8_t *) &(snd.worker_buffer->buffer[sizeof(src)]), &sent, sizeof(sent));
@@ -49,14 +49,11 @@ public:
                     //std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 2));
                 }
             } else if (received >= runs) {
-                printf("All sent & received\n");
                 break;
             }
         }
         
-        if (!running) {
-            std::cout << "Received: " << received << " Sent: " << sent << std::endl;
-        }
+        std::cout << "Received from " << dst << ": " << received << " Sent: " << sent << std::endl;
         
         udp.Close();
     }
@@ -69,8 +66,8 @@ public:
         tClientB = new std::thread(&OINetworkTest::Client, this, 5001, 5000);
         
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        
         running = false;
+        
         tClientA->join();
         tClientB->join();
         

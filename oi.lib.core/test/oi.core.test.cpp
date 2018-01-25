@@ -8,11 +8,10 @@ using namespace oi::core::worker;
 using namespace oi::core::recording;
 
 
-//const size_t oi::core::worker::BUFFER_SIZE = 2048;
+const size_t oi::core::worker::BUFFER_SIZE = 2048;
 
 class OITestObjectRef : public WorkerBufferRef {
 public:
-    
     const static uint8_t data_identifier = 0x69;
     
     OITestObjectRef(WorkerBufferRef && that) : WorkerBufferRef(std::move(that)) {
@@ -53,14 +52,16 @@ public:
     std::thread * tConsume1;
     std::thread * tConsume2;
     int runs = 0;
+    std::atomic<int> consumed;
     
-    bool running = true;
+    //bool running = true;
     
     WorkerQueue * worker1;
+    //running &&
     
     void CreateObjects() {
         int x = 0;
-        while (running && x < runs) {
+        while (x < runs) {
             OITestObjectRef o(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
             if (o.worker_buffer) {
                 o.setTime(NOWu());
@@ -75,7 +76,7 @@ public:
     }
     
     void ConsumeObjects() {
-        while (running) {
+        while (consumed < runs) {
             WorkerBufferRef o(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
             if (o.worker_buffer &&
                 o.worker_buffer->data_identifier == OITestObjectRef::data_identifier) {
@@ -83,6 +84,7 @@ public:
                 int id = x.getID();
                 std::chrono::microseconds t = x.getTime();
                 std::chrono::microseconds now = NOWu();
+                consumed++;
                 printf("Dequeued %d us: %lld\n", id, (now-t).count());
             }
         }
@@ -92,22 +94,24 @@ public:
     
     OICoreTest(std::string msg) {
         runs = 1000;
+        consumed = 0;
         worker1 = new WorkerQueue(2);
         
         std::chrono::microseconds t0 = NOWu();
         tCreate1 = new std::thread(&OICoreTest::CreateObjects, this);
         tConsume1 = new std::thread(&OICoreTest::ConsumeObjects, this);
         tConsume2 = new std::thread(&OICoreTest::ConsumeObjects, this);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
         
-        running = false;
-        worker1->close();
+        //running = false;
+        //worker1->close();
         tCreate1->join();
         printf("tCreate1 closed\n");
         tConsume1->join();
         printf("tConsume1 closed\n");
         tConsume2->join();
         printf("tConsume2 closed\n");
+        worker1->close();
         printf("End of programm %lld\n", (NOWu()-t0).count());
     }
 };

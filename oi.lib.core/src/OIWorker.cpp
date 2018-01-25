@@ -69,8 +69,9 @@ namespace oi { namespace core { namespace worker {
         _ref_obj_type = t;
         _enqueue = false;
         _return_to = q;
-        if (!worker_buffer && f == W_FLOW_BLOCKING && q->_running)
+        if (!worker_buffer && f == W_FLOW_BLOCKING && q->_running) {
             throw OIError("OIBufferQueue has no free/queued elements.");
+        }
     };
     
     WorkerBufferRef::~WorkerBufferRef() {
