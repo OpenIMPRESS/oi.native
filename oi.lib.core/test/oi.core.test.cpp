@@ -9,40 +9,10 @@ using namespace oi::core::recording;
 
 
 const size_t oi::core::worker::BUFFER_SIZE = 2048;
-
-class OITestObjectRef : public WorkerBufferRef {
+class TestObject : public DataObject {
 public:
-    const static uint8_t data_identifier = 0x69;
-    
-    OITestObjectRef(WorkerBufferRef && that) : WorkerBufferRef(std::move(that)) {
-        assert(worker_buffer->data_identifier == data_identifier);
-    }
-    
-    OITestObjectRef(WorkerQueue * q, W_TYPE t, W_FLOW f)
-    : WorkerBufferRef(q, t, f) {
-        worker_buffer->data_identifier = data_identifier;
-    }
-    
-    std::chrono::microseconds getTime() {
-        uint64_t res = 0;
-        memcpy(&res, &(worker_buffer->buffer[0]), sizeof(res));
-        return std::chrono::microseconds(res);
-    }
-    
-    void setTime(std::chrono::microseconds t) {
-        uint64_t _t = t.count();
-        memcpy((uint8_t *) &(worker_buffer->buffer[0]), &_t, sizeof(_t));
-    }
-    
-    int getID() {
-        int res;
-        memcpy(&res, &(worker_buffer->buffer[10]), sizeof(res));
-        return res;
-    }
-    
-    void setID(int id) {
-        memcpy((uint8_t *) &(worker_buffer->buffer[10]), &id, sizeof(id));
-    }
+    std::chrono::microseconds time;
+    int id;
 };
 
 
@@ -56,16 +26,16 @@ public:
     
     //bool running = true;
     
-    WorkerQueue * worker1;
+    WorkerQueue<TestObject> * worker1;
     //running &&
     
     void CreateObjects() {
         int x = 0;
         while (x < runs) {
-            OITestObjectRef o(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
+            DataObjectAcquisition<TestObject> o(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
             if (o.worker_buffer) {
-                o.setTime(NOWu());
-                o.setID(x);
+                o.worker_buffer->time = NOWu();
+                o.worker_buffer->id = x;
                 o.enqueue();
                 printf("Enqueued: %d\n", x);
                 x++;
@@ -77,12 +47,11 @@ public:
     
     void ConsumeObjects() {
         while (consumed < runs) {
-            WorkerBufferRef o(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
-            if (o.worker_buffer &&
-                o.worker_buffer->data_identifier == OITestObjectRef::data_identifier) {
-                OITestObjectRef x(std::move(o));
-                int id = x.getID();
-                std::chrono::microseconds t = x.getTime();
+            DataObjectAcquisition<TestObject> o(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+            if (o.worker_buffer) {
+                DataObjectAcquisition<TestObject> x(std::move(o));
+                int id = x.worker_buffer->id;
+                std::chrono::microseconds t = x.worker_buffer->time;
                 std::chrono::microseconds now = NOWu();
                 consumed++;
                 printf("Dequeued %d us: %lld\n", id, (now-t).count());
@@ -95,7 +64,7 @@ public:
     OICoreTest(std::string msg) {
         runs = 1000;
         consumed = 0;
-        worker1 = new WorkerQueue(2);
+        worker1 = new WorkerQueue<TestObject>(2);
         
         std::chrono::microseconds t0 = NOWu();
         tCreate1 = new std::thread(&OICoreTest::CreateObjects, this);

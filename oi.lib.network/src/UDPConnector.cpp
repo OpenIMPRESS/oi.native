@@ -59,7 +59,7 @@ namespace oi { namespace core { namespace network {
             }
             
             // HANDLE INCOMMING DATA...
-            worker::WorkerBufferRef rec(queue_receive, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
+            worker::DataObjectAcquisition<UDPMessageObject> rec(queue_receive, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
             if (!rec.worker_buffer) continue;
             
             unsigned char * data = &(rec.worker_buffer->buffer[0]);

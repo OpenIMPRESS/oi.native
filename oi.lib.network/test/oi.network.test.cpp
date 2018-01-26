@@ -29,7 +29,7 @@ public:
         std::cout << "Starting send: " << src << "\n";
         
         while (running) {
-            WorkerBufferRef rec(udp.queue_receive, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+            DataObjectAcquisition<UDPMessageObject> rec(udp.queue_receive, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
             if (rec.worker_buffer) {
                 int rec_src = 0;
                 int rec_sent = 0;
@@ -39,7 +39,7 @@ public:
             }
             
             if (sent < runs) {
-                WorkerBufferRef snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
                 if (snd.worker_buffer) {
                     memcpy((uint8_t *) &(snd.worker_buffer->buffer[0]), &src, sizeof(src));
                     memcpy((uint8_t *) &(snd.worker_buffer->buffer[sizeof(src)]), &sent, sizeof(sent));
