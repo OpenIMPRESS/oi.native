@@ -10,9 +10,14 @@ namespace oi { namespace core { namespace network {
         UDPConnector(int listenPort, int sendPort, std::string sendHost, asio::io_service& io_service);
         bool Init(std::string sid, std::string guid, bool is_sender, size_t pool_size);
         
-        worker::WorkerQueue<UDPMessageObject> * queue_send_client;
-        worker::WorkerQueue<UDPMessageObject> * queue_receive_client;
+        /*
+        int Send(uint8_t * data, size_t len);
+        int Send(std::string data);
+        int Send(std::string data, asio::ip::udp::endpoint endpoint);*/
+        int Send(uint8_t * data, size_t len, asio::ip::udp::endpoint endpoint);
         
+        worker::WorkerQueue<UDPMessageObject> * queue_send();
+        worker::WorkerQueue<UDPMessageObject> * queue_receive();
     private:
         void Update();
         void Register();
@@ -33,6 +38,10 @@ namespace oi { namespace core { namespace network {
         std::string guid;
         bool is_sender;
         asio::ip::udp::endpoint _remote_endpoint;
+        
+        
+        worker::WorkerQueue<UDPMessageObject> * _queue_send_client;
+        worker::WorkerQueue<UDPMessageObject> * _queue_receive_client;
         
         std::thread * update_thread;
     };

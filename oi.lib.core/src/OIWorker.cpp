@@ -10,5 +10,9 @@ namespace oi { namespace core { namespace worker {
         data_start = 0;
     }
     
+    void DataObject::reset() {
+        data_end = 0;
+        data_start = 0;
+    }
 
 } } }

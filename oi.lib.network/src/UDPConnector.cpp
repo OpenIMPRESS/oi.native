@@ -12,10 +12,18 @@ namespace oi { namespace core { namespace network {
     UDPBase(listenPort, sendPort, sendHost, io_service) {
     }
     
+    worker::WorkerQueue<UDPMessageObject> * UDPConnector::queue_send() {
+        return _queue_send_client;
+    }
+    
+    worker::WorkerQueue<UDPMessageObject> * UDPConnector::queue_receive() {
+        return _queue_receive_client;
+    }
+    
     bool UDPConnector::Init(std::string sid, std::string guid, bool is_sender, size_t pool_size) {
         UDPBase::Init(pool_size); // receive_buffer_size, send_buffer_size,
-        this->queue_send_client = new worker::WorkerQueue<UDPMessageObject>(queue_send->object_pool());
-        this->queue_receive_client = new worker::WorkerQueue<UDPMessageObject>(queue_send->object_pool());
+        _queue_send_client = new worker::WorkerQueue<UDPMessageObject>(pool());
+        _queue_receive_client = new worker::WorkerQueue<UDPMessageObject>(pool());
         
         _remote_endpoint = _endpoint;
         _endpoint = asio::ip::udp::endpoint();
@@ -36,6 +44,35 @@ namespace oi { namespace core { namespace network {
         
         return true;
     }
+    
+    int UDPConnector::Send(uint8_t * data, size_t length, asio::ip::udp::endpoint endpoint) {
+        worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
+        if (doa_s.data) {
+            doa_s.data->buffer[0] = 0x73;
+            memcpy((uint8_t *) &(doa_s.data->buffer[1]), data, length);
+            doa_s.data->data_start = 0;
+            doa_s.data->data_end = length+1;
+            doa_s.data->endpoint = endpoint;
+            doa_s.data->default_endpoint = false;
+            doa_s.enqueue();
+            return length;
+        }
+        
+        return -1;
+    }
+    /*
+    
+    int UDPConnector::Send(std::string data, asio::ip::udp::endpoint endpoint) {
+        return Send((uint8_t *) data.c_str(), data.length(), endpoint);
+    }
+    
+    int UDPConnector::Send(uint8_t * data, size_t length) {
+        return Send(data, length, _endpoint);
+    }
+    
+    int UDPConnector::Send(std::string data) {
+        return Send((uint8_t *) data.c_str(), data.length(), _endpoint);
+    }*/
     
     // This thread (re-)establishes connection, seends heartbeats, etc.
     void UDPConnector::Update() {
@@ -63,15 +100,16 @@ namespace oi { namespace core { namespace network {
             }
             
             // FORWARD DATA TO CLIENT
-            worker::DataObjectAcquisition<UDPMessageObject> c_dat(queue_send_client, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
-            if (c_dat.data) {
+            //worker::DataObjectAcquisition<UDPMessageObject> c_dat(_queue_send_client, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
+            //if (c_dat.data) {
                 // TODO: Explicitly set endpoint?
                 // Else, do we need to add byte prefix?
-                c_dat.enqueue(queue_send);
-            }
+                
+            //    c_dat.enqueue(_queue_send);
+            //}
             
             // HANDLE INCOMMING DATA...
-            worker::DataObjectAcquisition<UDPMessageObject> rec(queue_receive, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
+            worker::DataObjectAcquisition<UDPMessageObject> rec(_queue_receive, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
             if (!rec.data) continue;
             
             uint8_t * data = &(rec.data->buffer[0]);
@@ -114,10 +152,10 @@ namespace oi { namespace core { namespace network {
                 rec.data->data_start = 13;
                 // TODO: WE SHOULD ENQUEUE TO AN INTERMEDIATE BUFFER (SPECIAL KIND OF WorkerQueue?)
                 // AND THEN COLLECT & EMIT DATA FROM THERE ONCE COMPLETE
-                rec.enqueue(queue_receive_client);
+                rec.enqueue(_queue_receive_client);
             } else if (magicByte == 0x73) { // 's', single part client data
                 rec.data->data_start = 1;
-                rec.enqueue(queue_receive_client);
+                rec.enqueue(_queue_receive_client);
             } {
                 std::cerr << "\nERROR: Unknown msg type: " << magicByte << endl;
             }
@@ -136,7 +174,7 @@ namespace oi { namespace core { namespace network {
         register_msg["isSender"] = (string)(is_sender ? "true" : "false");
         register_msg["localIP"] = localIP;
         register_msg["UID"] = guid;
-        Send(register_msg.dump(), _remote_endpoint);
+        UDPBase::Send(register_msg.dump(), _remote_endpoint);
         
         //stringstream ss;
         //ss << "d{\"packageType\":\"register\",\"socketID\":\"" << socketID << "\",\"isSender\":" << (string)(is_sender ? "true" : "false") << ",\"localIP\":\"" << localIP << "\",\"UID\":\"" << guid << "\"}";
@@ -147,7 +185,7 @@ namespace oi { namespace core { namespace network {
     void UDPConnector::Punch() {
         json register_msg;
         register_msg["type"] = "punch";
-        Send(register_msg.dump(), _remote_endpoint);
+        UDPBase::Send(register_msg.dump(), _endpoint);
         
         //std::string data = "d{\"type\":\"punch\"}";
         //Send(data, _endpoint);

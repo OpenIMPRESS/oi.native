@@ -26,10 +26,10 @@ public:
         
         int received = 0;
         int sent = 0;
-        std::cout << "Starting send: " << src << "\n";
+        printf("Starting send: %d\n", src);
         
         while (running) {
-            DataObjectAcquisition<UDPMessageObject> rec(udp.queue_receive, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+            DataObjectAcquisition<UDPMessageObject> rec(udp.queue_receive(), W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
             if (rec.data) {
                 int rec_src = 0;
                 int rec_sent = 0;
@@ -39,23 +39,27 @@ public:
             }
             
             if (sent < runs) {
-                DataObjectAcquisition<UDPMessageObject> snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> snd(udp.queue_send(), W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
                 if (snd.data) {
                     memcpy((uint8_t *) &(snd.data->buffer[0]), &src, sizeof(src));
                     memcpy((uint8_t *) &(snd.data->buffer[sizeof(src)]), &sent, sizeof(sent));
                     snd.data->data_end = sizeof(src)+sizeof(sent);
                     snd.enqueue();
                     sent += 1;
-                    //std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 2));
                 }
             } else if (received >= runs) {
                 break;
             }
         }
         
-        std::cout << "Received from " << dst << ": " << received << " Sent: " << sent << std::endl;
+        printf("Received from %d: %d Sent: %d\n", dst, received, sent);
         
         udp.Close();
+    }
+    
+    
+    void Connector() {
+        //UDPConnector uc(
     }
     
     OINetworkTest(std::string testName) {
@@ -71,14 +75,6 @@ public:
         tClientA->join();
         tClientB->join();
         
-        /*
-        std::this_thread::sleep_for(std::chrono::milliseconds(10000));
-        
-        running = false;
-        tClientA->join();
-        printf("tClientA closed\n");
-        tClientB->join();
-        printf("tClientB closed\n");*/
         printf("End of programm %lld\n", (NOWu()-t0).count());
     }
 };

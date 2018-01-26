@@ -21,6 +21,7 @@ namespace oi { namespace core { namespace worker {
         size_t data_start;
         const size_t buffer_size;
         uint8_t * const buffer;
+        void reset();
     };
     
     template <class DataObjectT>
@@ -166,8 +167,7 @@ namespace oi { namespace core { namespace worker {
         if (_enqueue) {
             _return_to->_enqueue(std::move(data));
         } else {
-            data->data_end = 0;
-            data->data_start = 0;
+            data->reset();
             _return_to->_return(std::move(data));
         }
     };
