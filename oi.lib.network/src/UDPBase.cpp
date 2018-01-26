@@ -19,9 +19,10 @@ namespace oi { namespace core { namespace network {
         this->_connected = true;
     }
     
-    bool UDPBase::Init(int receive_containers, int send_containers) {
-        this->queue_send = new worker::WorkerQueue<UDPMessageObject>(receive_containers);
-        this->queue_receive = new worker::WorkerQueue<UDPMessageObject>(send_containers);
+    bool UDPBase::Init(int poolSize) {
+        pool = new worker::ObjectPool<UDPMessageObject>(poolSize);
+        this->queue_send = new worker::WorkerQueue<UDPMessageObject>(pool);
+        this->queue_receive = new worker::WorkerQueue<UDPMessageObject>(pool);
         _listen_thread = new std::thread(&UDPBase::DataListener, this);
         _send_thread = new std::thread(&UDPBase::DataSender, this);
         return true;
@@ -40,7 +41,8 @@ namespace oi { namespace core { namespace network {
         worker::DataObjectAcquisition<UDPMessageObject> _msg_ref(queue_send, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
         if (_msg_ref.data) {
             memcpy((uint8_t *) &(_msg_ref.data->buffer[0]), data, length);
-            _msg_ref.data->data_length = length;
+            _msg_ref.data->data_start = 0;
+            _msg_ref.data->data_end = length;
             _msg_ref.data->endpoint = endpoint;
             _msg_ref.enqueue();
             return length;
@@ -71,7 +73,8 @@ namespace oi { namespace core { namespace network {
             asio::socket_base::message_flags mf = 0;
             
             try {
-                _socket.send_to(asio::buffer(wbr.data->buffer, wbr.data->data_length),
+                // TODO: should we start from buffer[..data_start] ?
+                _socket.send_to(asio::buffer(wbr.data->buffer, wbr.data->data_end),
                                 wbr.data->endpoint, mf, ec);
             } catch (std::exception& e) {
                 std::cerr << "Exception while sending (Code " << ec << "): " << e.what() << std::endl;
@@ -99,8 +102,8 @@ namespace oi { namespace core { namespace network {
                 //size_t len = _socket.receive(asio::buffer(wbr.worker_buffer->buffer, wbr.worker_buffer->buffer_size), mf, ec);
                 size_t len = _socket.receive_from(asio::buffer(wbr.data->buffer, wbr.data->buffer_size), recv_endpoint, mf, ec);
                 if (len > 0) {
-                    wbr.data->data_length = len;
                     wbr.data->data_start = 0;
+                    wbr.data->data_end = len;
                     wbr.data->endpoint = recv_endpoint;
                     wbr.enqueue();
                 }

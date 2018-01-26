@@ -1,14 +1,5 @@
 #pragma once
 #include <asio.hpp>
-/*
-#include <chrono>
-#include <thread>
-#include <queue>
-#include <string>
-#include <iostream>
-#include <cstdlib>
-*/
-
 #include "json.hpp"
 #include "UDPBase.hpp"
 
@@ -17,7 +8,10 @@ namespace oi { namespace core { namespace network {
     class UDPConnector : public UDPBase {
     public:
         UDPConnector(int listenPort, int sendPort, std::string sendHost, asio::io_service& io_service);
-        bool Init(std::string sid, std::string guid, bool issender, size_t receive_buffer_size, int receive_containers, size_t send_buffer_size, int send_containers);
+        bool Init(std::string sid, std::string guid, bool is_sender, size_t pool_size);
+        
+        worker::WorkerQueue<UDPMessageObject> * queue_send_client;
+        worker::WorkerQueue<UDPMessageObject> * queue_receive_client;
         
     private:
         void Update();

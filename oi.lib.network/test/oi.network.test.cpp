@@ -20,7 +20,7 @@ public:
     
     void Client(int src, int dst) {
         UDPBase udp(src, dst, "127.0.0.1", io_service);
-        udp.Init(5, 5);
+        udp.Init(5);
         
         std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 100));
         
@@ -43,7 +43,7 @@ public:
                 if (snd.data) {
                     memcpy((uint8_t *) &(snd.data->buffer[0]), &src, sizeof(src));
                     memcpy((uint8_t *) &(snd.data->buffer[sizeof(src)]), &sent, sizeof(sent));
-                    snd.data->data_length = sizeof(src)+sizeof(sent);
+                    snd.data->data_end = sizeof(src)+sizeof(sent);
                     snd.enqueue();
                     sent += 1;
                     //std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 2));

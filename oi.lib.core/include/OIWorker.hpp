@@ -14,42 +14,45 @@ namespace oi { namespace core { namespace worker {
     enum W_TYPE { W_TYPE_UNUSED, W_TYPE_QUEUED };
     enum W_FLOW { W_FLOW_BLOCKING, W_FLOW_NONBLOCKING };
     
-    
-    // This needs to have standard layout
     class DataObject {
     public:
         DataObject();
-        size_t data_length;
+        size_t data_end;
         size_t data_start;
         const size_t buffer_size;
-        uint8_t data_identifier;
         uint8_t * const buffer;
     };
     
-    
     template <class DataObjectT>
     class DataObjectAcquisition;
+    
+    template <class DataObjectT>
+    class ObjectPool {
+    public:
+        ObjectPool(size_t n);
+        std::condition_variable have_unused_cv;
+        std::queue<std::unique_ptr<DataObjectT>> _queue_unused;
+        std::mutex _m_unused;
+    };
     
     template <class DataObjectT>
     class WorkerQueue {
         static_assert(std::is_base_of<DataObject, DataObjectT>::value, "DataObjectT in WorkerQueue must derive from DataObject");
         friend class DataObjectAcquisition<DataObjectT>;
     public:
-        WorkerQueue(size_t n_worker_objects);
+        WorkerQueue(ObjectPool<DataObjectT> * objectPool);
+        ObjectPool<DataObjectT> * object_pool();
         void close();
     protected:
         std::unique_ptr<DataObjectT> _get_data(W_TYPE t, W_FLOW f);
         void _return(std::unique_ptr<DataObjectT> p);
         void _enqueue(std::unique_ptr<DataObjectT> p);
-        std::queue<std::unique_ptr<DataObjectT>> _queue_unused;
         std::queue<std::unique_ptr<DataObjectT>> _queue_ready;
         std::condition_variable have_queued_cv;
-        std::condition_variable have_unused_cv;
-        std::mutex _m_unused;
         std::mutex _m_ready;
         std::atomic<bool> _running;
+        ObjectPool<DataObjectT> * _object_pool;
     };
-    
     
     template <class DataObjectT>
     class DataObjectAcquisition {
@@ -78,20 +81,29 @@ namespace oi { namespace core { namespace worker {
         OIError(std::string m) : runtime_error(m) {}
     };
     
+    template <class DataObjectT>
+    ObjectPool<DataObjectT>::ObjectPool(size_t n_worker_objects) {
+         for (int i = 0; i < n_worker_objects; i++) {
+             std::unique_ptr<DataObjectT> wo(new DataObjectT());
+             _queue_unused.push(std::move(wo));
+         }
+    }
     
     template <class DataObjectT>
-    WorkerQueue<DataObjectT>::WorkerQueue(size_t n_worker_objects) {
-        for (int i = 0; i < n_worker_objects; i++) {
-            std::unique_ptr<DataObjectT> wo(new DataObjectT());
-            _queue_unused.push(std::move(wo));
-        }
+    WorkerQueue<DataObjectT>::WorkerQueue(ObjectPool<DataObjectT> * objectPool) {
+        _object_pool = objectPool;
         _running = true;
+    }
+    
+    template <class DataObjectT>
+    ObjectPool<DataObjectT> * WorkerQueue<DataObjectT>::object_pool() {
+        return _object_pool;
     }
     
     template <class DataObjectT>
     void WorkerQueue<DataObjectT>::close() {
         _running = false;
-        have_unused_cv.notify_all();
+        _object_pool->have_unused_cv.notify_all();
         have_queued_cv.notify_all();
     }
     
@@ -99,9 +111,9 @@ namespace oi { namespace core { namespace worker {
     template <class DataObjectT>
     void WorkerQueue<DataObjectT>::_return(std::unique_ptr<DataObjectT> p) {
         if (!p) throw OIError("Returned nullptr.");
-        std::unique_lock<std::mutex> lk(_m_unused);
-        _queue_unused.push(std::move(p));
-        have_unused_cv.notify_one();
+        std::unique_lock<std::mutex> lk(_object_pool->_m_unused);
+        _object_pool->_queue_unused.push(std::move(p));
+        _object_pool->have_unused_cv.notify_one();
     }
     
     template <class DataObjectT>
@@ -124,13 +136,13 @@ namespace oi { namespace core { namespace worker {
             _queue_ready.pop();
             return res;
         } else if (t == W_TYPE_UNUSED) {
-            std::unique_lock<std::mutex> lk(_m_unused);
-            while (_running && f == W_FLOW_BLOCKING && _queue_unused.empty()) {
-                have_unused_cv.wait(lk);
+            std::unique_lock<std::mutex> lk(_object_pool->_m_unused);
+            while (_running && f == W_FLOW_BLOCKING && _object_pool->_queue_unused.empty()) {
+                _object_pool->have_unused_cv.wait(lk);
             }
-            if (_queue_unused.empty()) return std::unique_ptr<DataObjectT>(nullptr);
-            std::unique_ptr<DataObjectT> res(std::move(_queue_unused.front()));
-            _queue_unused.pop();
+            if (_object_pool->_queue_unused.empty()) return std::unique_ptr<DataObjectT>(nullptr);
+            std::unique_ptr<DataObjectT> res(std::move(_object_pool->_queue_unused.front()));
+            _object_pool->_queue_unused.pop();
             return res;
         } else {
             return std::unique_ptr<DataObjectT>(nullptr);
@@ -154,9 +166,8 @@ namespace oi { namespace core { namespace worker {
         if (_enqueue) {
             _return_to->_enqueue(std::move(data));
         } else {
-            data->data_length = 0;
+            data->data_end = 0;
             data->data_start = 0;
-            data->data_identifier = 0x00;
             _return_to->_return(std::move(data));
         }
     };

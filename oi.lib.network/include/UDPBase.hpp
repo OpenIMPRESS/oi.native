@@ -21,11 +21,12 @@ namespace oi { namespace core { namespace network {
     public:
         UDPBase(int listenPort, int sendPort, std::string sendHost, asio::io_service& io_service);
         
+        worker::ObjectPool<UDPMessageObject> * pool;
         worker::WorkerQueue<UDPMessageObject> * queue_send;
         worker::WorkerQueue<UDPMessageObject> * queue_receive;
         
         /// Starts listening
-        bool Init(int receive_containers, int send_containers);
+        bool Init(int poolSize);
         
         /// Stop listening, deallocate resources.
         void Close();

@@ -6,9 +6,8 @@ namespace oi { namespace core { namespace worker {
     DataObject::DataObject()
     : buffer_size(BUFFER_SIZE)
     , buffer(new uint8_t[BUFFER_SIZE]) {
-        data_length = 0;
+        data_end = 0;
         data_start = 0;
-        data_identifier = 0x00;
     }
     
 

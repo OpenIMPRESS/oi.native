@@ -26,6 +26,7 @@ public:
     
     //bool running = true;
     
+    ObjectPool<TestObject> * pool;
     WorkerQueue<TestObject> * worker1;
     //running &&
     
@@ -64,7 +65,8 @@ public:
     OICoreTest(std::string msg) {
         runs = 1000;
         consumed = 0;
-        worker1 = new WorkerQueue<TestObject>(2);
+        pool = new ObjectPool<TestObject>(2);
+        worker1 = new WorkerQueue<TestObject>(pool);
         
         std::chrono::microseconds t0 = NOWu();
         tCreate1 = new std::thread(&OICoreTest::CreateObjects, this);
