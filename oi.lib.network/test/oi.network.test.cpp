@@ -30,20 +30,20 @@ public:
         
         while (running) {
             DataObjectAcquisition<UDPMessageObject> rec(udp.queue_receive, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
-            if (rec.worker_buffer) {
+            if (rec.data) {
                 int rec_src = 0;
                 int rec_sent = 0;
-                memcpy(&rec_src, (uint8_t *) &(rec.worker_buffer->buffer[0]), sizeof(rec_src));
-                memcpy(&rec_sent, (uint8_t *) &(rec.worker_buffer->buffer[sizeof(rec_src)]), sizeof(rec_sent));
+                memcpy(&rec_src, (uint8_t *) &(rec.data->buffer[0]), sizeof(rec_src));
+                memcpy(&rec_sent, (uint8_t *) &(rec.data->buffer[sizeof(rec_src)]), sizeof(rec_sent));
                 received += 1;
             }
             
             if (sent < runs) {
                 DataObjectAcquisition<UDPMessageObject> snd(udp.queue_send, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
-                if (snd.worker_buffer) {
-                    memcpy((uint8_t *) &(snd.worker_buffer->buffer[0]), &src, sizeof(src));
-                    memcpy((uint8_t *) &(snd.worker_buffer->buffer[sizeof(src)]), &sent, sizeof(sent));
-                    snd.worker_buffer->data_length = sizeof(src)+sizeof(sent);
+                if (snd.data) {
+                    memcpy((uint8_t *) &(snd.data->buffer[0]), &src, sizeof(src));
+                    memcpy((uint8_t *) &(snd.data->buffer[sizeof(src)]), &sent, sizeof(sent));
+                    snd.data->data_length = sizeof(src)+sizeof(sent);
                     snd.enqueue();
                     sent += 1;
                     //std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 2));

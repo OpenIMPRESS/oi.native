@@ -33,9 +33,9 @@ public:
         int x = 0;
         while (x < runs) {
             DataObjectAcquisition<TestObject> o(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
-            if (o.worker_buffer) {
-                o.worker_buffer->time = NOWu();
-                o.worker_buffer->id = x;
+            if (o.data) {
+                o.data->time = NOWu();
+                o.data->id = x;
                 o.enqueue();
                 printf("Enqueued: %d\n", x);
                 x++;
@@ -48,10 +48,10 @@ public:
     void ConsumeObjects() {
         while (consumed < runs) {
             DataObjectAcquisition<TestObject> o(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
-            if (o.worker_buffer) {
+            if (o.data) {
                 DataObjectAcquisition<TestObject> x(std::move(o));
-                int id = x.worker_buffer->id;
-                std::chrono::microseconds t = x.worker_buffer->time;
+                int id = x.data->id;
+                std::chrono::microseconds t = x.data->time;
                 std::chrono::microseconds now = NOWu();
                 consumed++;
                 printf("Dequeued %d us: %lld\n", id, (now-t).count());

@@ -38,10 +38,10 @@ namespace oi { namespace core { namespace network {
     
     int UDPBase::Send(uint8_t * data, size_t length, asio::ip::udp::endpoint endpoint) {
         worker::DataObjectAcquisition<UDPMessageObject> _msg_ref(queue_send, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
-        if (_msg_ref.worker_buffer) {
-            memcpy((uint8_t *) &(_msg_ref.worker_buffer->buffer[0]), data, length);
-            _msg_ref.worker_buffer->data_length = length;
-            _msg_ref.worker_buffer->endpoint = endpoint;
+        if (_msg_ref.data) {
+            memcpy((uint8_t *) &(_msg_ref.data->buffer[0]), data, length);
+            _msg_ref.data->data_length = length;
+            _msg_ref.data->endpoint = endpoint;
             _msg_ref.enqueue();
             return length;
         }
@@ -65,14 +65,14 @@ namespace oi { namespace core { namespace network {
         _running = true;
         while (_running) {
             worker::DataObjectAcquisition<UDPMessageObject> wbr(this->queue_send, worker::W_TYPE_QUEUED, worker::W_FLOW_BLOCKING);
-            if (!_running || !wbr.worker_buffer) continue;
+            if (!_running || !wbr.data) continue;
             
             asio::error_code ec;
             asio::socket_base::message_flags mf = 0;
             
             try {
-                _socket.send_to(asio::buffer(wbr.worker_buffer->buffer, wbr.worker_buffer->data_length),
-                                wbr.worker_buffer->endpoint, mf, ec);
+                _socket.send_to(asio::buffer(wbr.data->buffer, wbr.data->data_length),
+                                wbr.data->endpoint, mf, ec);
             } catch (std::exception& e) {
                 std::cerr << "Exception while sending (Code " << ec << "): " << e.what() << std::endl;
                 _running = false;
@@ -88,7 +88,7 @@ namespace oi { namespace core { namespace network {
         _running = true;
         while (_running) {
             worker::DataObjectAcquisition<UDPMessageObject> wbr(this->queue_receive, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
-            if (!_running || !wbr.worker_buffer) continue;
+            if (!_running || !wbr.data) continue;
             
             asio::error_code ec;
             asio::socket_base::message_flags mf = 0;
@@ -97,11 +97,11 @@ namespace oi { namespace core { namespace network {
             
             try {
                 //size_t len = _socket.receive(asio::buffer(wbr.worker_buffer->buffer, wbr.worker_buffer->buffer_size), mf, ec);
-                size_t len = _socket.receive_from(asio::buffer(wbr.worker_buffer->buffer, wbr.worker_buffer->buffer_size), recv_endpoint, mf, ec);
+                size_t len = _socket.receive_from(asio::buffer(wbr.data->buffer, wbr.data->buffer_size), recv_endpoint, mf, ec);
                 if (len > 0) {
-                    wbr.worker_buffer->data_length = len;
-                    wbr.worker_buffer->data_start = 0;
-                    wbr.worker_buffer->endpoint = recv_endpoint;
+                    wbr.data->data_length = len;
+                    wbr.data->data_start = 0;
+                    wbr.data->endpoint = recv_endpoint;
                     wbr.enqueue();
                 }
             } catch (std::exception& e) {

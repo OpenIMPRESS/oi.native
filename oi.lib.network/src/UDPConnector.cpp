@@ -60,10 +60,10 @@ namespace oi { namespace core { namespace network {
             
             // HANDLE INCOMMING DATA...
             worker::DataObjectAcquisition<UDPMessageObject> rec(queue_receive, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
-            if (!rec.worker_buffer) continue;
+            if (!rec.data) continue;
             
-            unsigned char * data = &(rec.worker_buffer->buffer[0]);
-            size_t len = rec.worker_buffer->data_length;
+            unsigned char * data = &(rec.data->buffer[0]);
+            size_t len = rec.data->data_length;
             
             char magicByte = data[0];
             
