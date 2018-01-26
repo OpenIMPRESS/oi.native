@@ -29,22 +29,22 @@ public:
         printf("Starting send: %d\n", src);
         
         while (running) {
-            DataObjectAcquisition<UDPMessageObject> rec(udp.queue_receive(), W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
-            if (rec.data) {
+            DataObjectAcquisition<UDPMessageObject> doa_r(udp.queue_receive(), W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+            if (doa_r.data) {
                 int rec_src = 0;
                 int rec_sent = 0;
-                memcpy(&rec_src, (uint8_t *) &(rec.data->buffer[0]), sizeof(rec_src));
-                memcpy(&rec_sent, (uint8_t *) &(rec.data->buffer[sizeof(rec_src)]), sizeof(rec_sent));
+                memcpy(&rec_src, (uint8_t *) &(doa_r.data->buffer[0]), sizeof(rec_src));
+                memcpy(&rec_sent, (uint8_t *) &(doa_r.data->buffer[sizeof(rec_src)]), sizeof(rec_sent));
                 received += 1;
             }
             
             if (sent < runs) {
-                DataObjectAcquisition<UDPMessageObject> snd(udp.queue_send(), W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
-                if (snd.data) {
-                    memcpy((uint8_t *) &(snd.data->buffer[0]), &src, sizeof(src));
-                    memcpy((uint8_t *) &(snd.data->buffer[sizeof(src)]), &sent, sizeof(sent));
-                    snd.data->data_end = sizeof(src)+sizeof(sent);
-                    snd.enqueue();
+                DataObjectAcquisition<UDPMessageObject> doa_s(udp.queue_send(), W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
+                if (doa_s.data) {
+                    memcpy((uint8_t *) &(doa_s.data->buffer[0]), &src, sizeof(src));
+                    memcpy((uint8_t *) &(doa_s.data->buffer[sizeof(src)]), &sent, sizeof(sent));
+                    doa_s.data->data_end = sizeof(src)+sizeof(sent);
+                    doa_s.enqueue();
                     sent += 1;
                 }
             } else if (received >= runs) {

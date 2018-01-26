@@ -33,11 +33,11 @@ public:
     void CreateObjects() {
         int x = 0;
         while (x < runs) {
-            DataObjectAcquisition<TestObject> o(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
-            if (o.data) {
-                o.data->time = NOWu();
-                o.data->id = x;
-                o.enqueue();
+            DataObjectAcquisition<TestObject> doa(worker1, W_TYPE_UNUSED, W_FLOW_BLOCKING);
+            if (doa.data) {
+                doa.data->time = NOWu();
+                doa.data->id = x;
+                doa.enqueue();
                 printf("Enqueued: %d\n", x);
                 x++;
             }
@@ -48,9 +48,9 @@ public:
     
     void ConsumeObjects() {
         while (consumed < runs) {
-            DataObjectAcquisition<TestObject> o(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
-            if (o.data) {
-                DataObjectAcquisition<TestObject> x(std::move(o));
+            DataObjectAcquisition<TestObject> doa(worker1, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+            if (doa.data) {
+                DataObjectAcquisition<TestObject> x(std::move(doa));
                 int id = x.data->id;
                 std::chrono::microseconds t = x.data->time;
                 std::chrono::microseconds now = NOWu();
