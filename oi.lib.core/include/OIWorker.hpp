@@ -21,7 +21,7 @@ namespace oi { namespace core { namespace worker {
         size_t data_start;
         const size_t buffer_size;
         uint8_t * const buffer;
-        void reset();
+        virtual void reset();
     };
     
     template <class DataObjectT>

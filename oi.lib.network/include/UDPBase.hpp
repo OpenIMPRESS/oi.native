@@ -14,7 +14,7 @@ namespace oi { namespace core { namespace network {
     class UDPMessageObject : public worker::DataObject {
     public:
         asio::ip::udp::endpoint endpoint;
-        bool default_endpoint;
+        bool default_endpoint = true;
         void reset();
     };
     
@@ -30,10 +30,10 @@ namespace oi { namespace core { namespace network {
         
         // This call may block until there are unused worker buffers in send queue
         // May return -1 on failure.
-        int Send(uint8_t * data, size_t len);
-        int Send(std::string data);
-        int Send(std::string data, asio::ip::udp::endpoint endpoint);
-        int Send(uint8_t * data, size_t len, asio::ip::udp::endpoint endpoint);
+        virtual int Send(uint8_t * data, size_t len);
+        virtual int Send(std::string data);
+        virtual int Send(std::string data, asio::ip::udp::endpoint endpoint);
+        virtual int Send(uint8_t * data, size_t len, asio::ip::udp::endpoint endpoint);
         
         worker::ObjectPool<UDPMessageObject> * pool();
         worker::WorkerQueue<UDPMessageObject> * queue_send();
