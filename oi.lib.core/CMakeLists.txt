@@ -11,6 +11,8 @@ target_include_directories(oi.core PUBLIC
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
 
+target_link_libraries(oi.core oi.proto)
+
 # 'make install' to the correct locations (provided by GNUInstallDirs).
 install(TARGETS oi.core EXPORT OICoreConfig
     ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}

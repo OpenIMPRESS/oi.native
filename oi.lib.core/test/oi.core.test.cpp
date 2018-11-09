@@ -7,14 +7,17 @@ using namespace oi::core;
 using namespace oi::core::worker;
 using namespace oi::core::recording;
 
-
-const size_t oi::core::worker::BUFFER_SIZE = 2048;
 class TestObject : public DataObject {
 public:
+    TestObject(size_t buffer_size, worker::ObjectPool<TestObject> * _pool);
+    virtual ~TestObject();
     std::chrono::microseconds time;
     int id;
 };
 
+TestObject::TestObject(size_t buffer_size, worker::ObjectPool<TestObject> * _pool) :
+    DataObject(buffer_size,  (worker::ObjectPool<DataObject>*) _pool) {}
+TestObject::~TestObject() {};
 
 class OICoreTest {
 public:
@@ -65,7 +68,7 @@ public:
     OICoreTest(std::string msg) {
         runs = 1000;
         consumed = 0;
-        pool = new ObjectPool<TestObject>(2);
+        pool = new ObjectPool<TestObject>(2, 1024);
         worker1 = new WorkerQueue<TestObject>(pool);
         
         std::chrono::microseconds t0 = NOWu();

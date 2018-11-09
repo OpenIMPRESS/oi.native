@@ -15,20 +15,12 @@ You should have received a copy of the GNU Lesser General Public License
 along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include <iostream>
+#include <thread>
+#include <cassert>
+#include "OICore.hpp"
 
-#include "OIIO.hpp"
-#include "OIWorker.hpp"
+int main(int argc, char* argv[]) {
+    printf("TODO\n");
+}
 
-namespace oi { namespace core {
-    
-    // Some config parser?
-    
-    std::chrono::milliseconds NOW();
-    std::chrono::microseconds NOWu();
-    
-
-        
-        void debugMemory(unsigned char * loc, size_t len);
-    
-} }

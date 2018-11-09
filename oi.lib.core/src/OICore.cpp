@@ -1,4 +1,21 @@
-#include "OICore.hpp" 
+/*
+This file is part of the OpenIMPRESS project.
+
+OpenIMPRESS is free software: you can redistribute it and/or modify
+it under the terms of the Lesser GNU Lesser General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+OpenIMPRESS is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
+*/
+
+#include "OICore.hpp"
 
 namespace oi { namespace core {
     
@@ -15,5 +32,24 @@ namespace oi { namespace core {
         );
     }
     
+    void debugMemory(unsigned char * loc, size_t len) {
+        size_t i;
+        printf("\n+++++++++++++++++++++++++++++++++++++++++++\n+ ");
+        for (i=0; i < len; ++i) {
+            printf("0x%02x ", loc[i]);
+            if ((i+1) % 8 == 0 && (i+1) != len) {
+                printf("+\n+ ");
+            }
+        }
+        
+        i = 0;
+        if (len % 8 > 0) {
+            for (i=0; i < 8 - len % 8; ++i) {
+                printf("     ");
+            }
+        }
+        
+        printf("+\n+++++++++++++++++++++++++++++++++++++++++++\n\n");
+    }
     
 } }

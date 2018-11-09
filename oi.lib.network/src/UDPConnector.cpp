@@ -1,3 +1,20 @@
+/*
+This file is part of the OpenIMPRESS project.
+
+OpenIMPRESS is free software: you can redistribute it and/or modify
+it under the terms of the Lesser GNU Lesser General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+OpenIMPRESS is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #include "UDPConnector.hpp"
 #include "OICore.hpp"
 
@@ -20,12 +37,15 @@ namespace oi { namespace core { namespace network {
         return _queue_receive_client;
     }
     
-    bool UDPConnector::Init(std::string sid, std::string guid, bool is_sender, size_t pool_size) {
-        UDPBase::Init(pool_size); // receive_buffer_size, send_buffer_size,
-        _queue_send_client = new worker::WorkerQueue<UDPMessageObject>(pool());
-        _queue_receive_client = new worker::WorkerQueue<UDPMessageObject>(pool());
+    bool UDPConnector::Init(std::string sid, std::string guid, bool is_sender) {
+        UDPBase::Init(); // receive_buffer_size, send_buffer_size
+        // TODO create our queues by hand or get them passed...
+        // per default (allways?) add a queue for OI messages...
         
-        _remote_endpoint = _endpoint;
+        //_queue_send_client = new worker::WorkerQueue<UDPMessageObject>(pool());
+        //_queue_receive_client = new worker::WorkerQueue<UDPMessageObject>(pool());
+        
+        _mm_endpoint = _endpoint;
         _endpoint = asio::ip::udp::endpoint();
         registerInterval = (milliseconds)2000;
         HBInterval = (milliseconds)2000;
@@ -47,18 +67,15 @@ namespace oi { namespace core { namespace network {
     
     int UDPConnector::Send(uint8_t * data, size_t length, asio::ip::udp::endpoint endpoint) {
         worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
-        if (doa_s.data) {
-            doa_s.data->buffer[0] = 0x73;
-            memcpy((uint8_t *) &(doa_s.data->buffer[1]), data, length);
-            doa_s.data->data_start = 0;
-            doa_s.data->data_end = length+1;
-            doa_s.data->endpoint = endpoint;
-            doa_s.data->default_endpoint = false;
-            doa_s.enqueue();
-            return length;
-        }
-        
-        return -1;
+        if (!doa_s.data) return -1;
+        doa_s.data->buffer[0] = 0x73;
+        memcpy((uint8_t *) &(doa_s.data->buffer[1]), data, length);
+        doa_s.data->data_start = 0;
+        doa_s.data->data_end = length+1;
+        doa_s.data->endpoint = endpoint;
+        doa_s.data->default_endpoint = false;
+        doa_s.enqueue();
+        return length;
     }
     /*
     
@@ -156,7 +173,7 @@ namespace oi { namespace core { namespace network {
             } else if (magicByte == 0x73) { // 's', single part client data
                 rec.data->data_start = 1;
                 rec.enqueue(_queue_receive_client);
-            } {
+            } else {
                 std::cerr << "\nERROR: Unknown msg type: " << magicByte << endl;
             }
         }
@@ -174,7 +191,7 @@ namespace oi { namespace core { namespace network {
         register_msg["isSender"] = (string)(is_sender ? "true" : "false");
         register_msg["localIP"] = localIP;
         register_msg["UID"] = guid;
-        UDPBase::Send(register_msg.dump(), _remote_endpoint);
+        UDPBase::Send(register_msg.dump(), _mm_endpoint);
         
         //stringstream ss;
         //ss << "d{\"packageType\":\"register\",\"socketID\":\"" << socketID << "\",\"isSender\":" << (string)(is_sender ? "true" : "false") << ",\"localIP\":\"" << localIP << "\",\"UID\":\"" << guid << "\"}";
