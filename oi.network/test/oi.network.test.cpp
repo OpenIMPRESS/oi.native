@@ -26,22 +26,24 @@ using namespace oi::core;
 using namespace oi::core::worker;
 using namespace oi::core::network;
 
-const uint16_t PKG_TYPE_A = 0x0102;
-const uint16_t PKG_TYPE_B = 0x0103;
+const uint16_t PKG_TYPE_A = 0x01;
+const uint16_t PKG_TYPE_B = 0x02;
 
 typedef struct {
-    uint16_t packetType = PKG_TYPE_A;
-    uint16_t unused     = 0x0000; // for consistent alignment
+    uint8_t  packetType = PKG_TYPE_A;
+    uint8_t  unused_1   = 0x00;
+    uint16_t unused_2   = 0x0000; // for consistent alignment
     uint32_t src        = 0x00000000;
     uint32_t data       = 0x00000000;
 } TEST_PACKET_A; // 12 bytes
 
 typedef struct {
-    uint16_t packetType = PKG_TYPE_B;
-    uint16_t unused     = 0x0000; // for consistent alignment
-    uint32_t      src        = 0x00000000;
-    uint32_t      data       = 0x00000000;
-    uint8_t       data_extra[512];
+    uint8_t  packetType = PKG_TYPE_B;
+    uint8_t  unused_1   = 0x00;
+    uint16_t unused_2   = 0x0000; // for consistent alignment
+    uint32_t src        = 0x00000000;
+    uint32_t data       = 0x00000000;
+    uint8_t  data_extra[512];
 } TEST_PACKET_B; // 12 bytes + 512 bytes
 
 
@@ -212,6 +214,6 @@ int main(int argc, char* argv[]) {
     //oi::core::debugMemory(((unsigned char *) &testStruct), sizeof(oi::core::network::OI_RGBD_HEADER));
     
     printf("Start\n");
-    OINetworkTest test("1");
+    //OINetworkTest test("1");
     printf("Done\n");
 }

@@ -1,17 +1,22 @@
-project(oi.lib.core VERSION 0.1 LANGUAGES CXX)
+project(oi.core VERSION 0.1 LANGUAGES CXX)
+
+#FIND_PACKAGE(Protobuf REQUIRED)
 
 file(GLOB SRC "src/*.cpp")
 file(GLOB HEADERS "include/*.hpp" "src/*.hpp")
-add_library(oi.core
-    ${SRC} ${HEADERS})
+add_library(${PROJECT_NAME} ${SRC} ${HEADERS})
 source_group("Header Files" FILES ${HEADERS})
 
-target_include_directories(oi.core PUBLIC
+#include_directories(${Protobuf_INCLUDE_DIRS})
+#include_directories(${oi.proto_INCLUDE_DIRS})
+
+target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
 
-target_link_libraries(oi.core oi.proto)
+#target_link_libraries(${PROJECT_NAME} oi.proto)
+
 
 # 'make install' to the correct locations (provided by GNUInstallDirs).
 install(TARGETS oi.core EXPORT OICoreConfig
@@ -26,13 +31,12 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT OICoreConfig DESTINATION share/OICore/cmake)
 
 # This makes the project importable from the build directory
-export(TARGETS oi.core FILE OICoreConfig.cmake)
+export(TARGETS ${PROJECT_NAME} FILE OICoreConfig.cmake)
 
-# Every library has unit tests, of course
-add_executable(oi.core.test
-    test/oi.core.test.cpp)
-
-target_link_libraries(oi.core.test
-    oi.core)
-
-add_test(oi.core.test oi.core.test)
+# TESTS
+add_executable(${PROJECT_NAME}.test
+    test/${PROJECT_NAME}.test.cpp
+    # ...
+)
+target_link_libraries(${PROJECT_NAME}.test ${PROJECT_NAME})
+add_test(${PROJECT_NAME}.test ${PROJECT_NAME}.test)

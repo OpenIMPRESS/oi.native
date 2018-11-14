@@ -21,6 +21,8 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <exception>
 #include <atomic>
 #include <iostream>
+#include <memory>
+#include <condition_variable>
 
 namespace oi { namespace core { namespace worker {
     
@@ -56,6 +58,7 @@ namespace oi { namespace core { namespace worker {
         const size_t buffer_size;
         uint8_t * const buffer;
         virtual void reset();
+        virtual ~DataObject();
     private:
         // TODO: could be stack?
         ObjectPool<DataObject> * _return_to_pool;

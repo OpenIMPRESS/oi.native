@@ -27,8 +27,6 @@ namespace oi { namespace core {
     std::chrono::milliseconds NOW();
     std::chrono::microseconds NOWu();
     
-
-        
-        void debugMemory(unsigned char * loc, size_t len);
+    void debugMemory(unsigned char * loc, size_t len);
     
 } }

@@ -62,8 +62,10 @@ namespace oi { namespace core { namespace network {
         /// Stop listening, deallocate resources.
         void Close();
         
-        int RegisterQueue(uint16_t data_type, worker::IOWorker<UDPMessageObject> * ioworker);
-        int RegisterQueue(uint16_t data_type, worker::WorkerQueue<UDPMessageObject> * queue, worker::Q_IO io_type);
+        asio::ip::udp::endpoint GetEndpoint(std::string host, std::string port);
+        
+        int RegisterQueue(uint8_t data_family, worker::IOWorker<UDPMessageObject> * ioworker);
+        int RegisterQueue(uint8_t data_family, worker::WorkerQueue<UDPMessageObject> * queue, worker::Q_IO io_type);
         
         // Send Queue
         
@@ -86,7 +88,7 @@ namespace oi { namespace core { namespace network {
         int DataListener();
         int DataSender();
         
-        std::map<std::pair<uint16_t, worker::Q_IO>, worker::WorkerQueue<UDPMessageObject> *> _queue_map;
+        std::map<std::pair<uint8_t, worker::Q_IO>, worker::WorkerQueue<UDPMessageObject> *> _queue_map;
         
         int _listen_port;
         int _send_port;

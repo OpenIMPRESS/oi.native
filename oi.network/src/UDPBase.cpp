@@ -41,8 +41,9 @@ namespace oi { namespace core { namespace network {
         asio::socket_base::send_buffer_size option_set(65500);
         this->_socket.set_option(option_set);
         
-        udp::resolver::query query(udp::v4(), this->_send_host, std::to_string(this->_send_port));
-        this->_endpoint = * _resolver.resolve(query);
+        this->_endpoint = GetEndpoint(_send_host, std::to_string(this->_send_port));
+        //udp::resolver::query query(udp::v4(), this->_send_host, std::to_string(this->_send_port));
+        //this->_endpoint = * _resolver.resolve(query);
         this->_connected = true;
         this->_receiver_initialized = false;
         this->_sender_initialized = false;
@@ -94,13 +95,13 @@ namespace oi { namespace core { namespace network {
     
     
     
-    int UDPBase::RegisterQueue(uint16_t data_type, worker::IOWorker<UDPMessageObject> * ioworker) {
-        return RegisterQueue(data_type, ioworker->in(), worker::Q_IO_IN) &&
-               RegisterQueue(data_type, ioworker->out(), worker::Q_IO_OUT);
+    int UDPBase::RegisterQueue(uint8_t data_family, worker::IOWorker<UDPMessageObject> * ioworker) {
+        return RegisterQueue(data_family, ioworker->in(), worker::Q_IO_IN) &&
+               RegisterQueue(data_family, ioworker->out(), worker::Q_IO_OUT);
     }
     
-    int UDPBase::RegisterQueue(uint16_t data_type, worker::WorkerQueue<UDPMessageObject> * queue, worker::Q_IO io_type) {
-        std::pair<uint16_t, worker::Q_IO> key = std::make_pair(data_type, io_type);
+    int UDPBase::RegisterQueue(uint8_t data_family, worker::WorkerQueue<UDPMessageObject> * queue, worker::Q_IO io_type) {
+        std::pair<uint8_t, worker::Q_IO> key = std::make_pair(data_family, io_type);
         if (_queue_map.count(key) == 1) return -1;
         _queue_map[key] = queue;
         return 1;
@@ -137,6 +138,11 @@ namespace oi { namespace core { namespace network {
     }
     
     
+    asio::ip::udp::endpoint UDPBase::GetEndpoint(std::string host, std::string port) {
+        udp::resolver resolver(_io_service);
+        udp::resolver::query query(udp::v4(), host, port);
+        return *resolver.resolve(query);
+    }
     
     // Add message to outgoing queue by copying the buffer
     int UDPBase::Send(uint8_t * data, size_t length, asio::ip::udp::endpoint endpoint) {
