@@ -14,9 +14,7 @@
  You should have received a copy of the GNU Lesser General Public License
  along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
  */
-
-#ifndef OI_HEADERS_H
-#define OI_HEADERS_H
+#pragma once
 
 namespace oi { namespace core {
     
@@ -134,4 +132,3 @@ namespace oi { namespace core {
     } OI_SOURCE_SPECIFICATION; // ...
     */
 } }
-#endif

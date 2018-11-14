@@ -14,6 +14,7 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
+#pragma once
 
 #include <asio.hpp>
 #include <chrono>
@@ -25,8 +26,6 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <map>
 #include <OIWorker.hpp>
 
-
-#pragma once
 namespace oi { namespace core { namespace network {
     
     class UDPMessageObject : public worker::DataObject {
