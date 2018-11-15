@@ -5,8 +5,7 @@ set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DASIO_STANDALONE=YES" )
 
 file(GLOB SRC "src/*.cpp")
 file(GLOB HEADERS "include/*.hpp" "src/*.hpp")
-add_library(${PROJECT_NAME}
-    ${SRC} ${HEADERS})
+add_library(${PROJECT_NAME} ${SRC} ${HEADERS})
 source_group("Header Files" FILES ${HEADERS})
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -26,7 +25,6 @@ install(TARGETS ${PROJECT_NAME} EXPORT OINetworkConfig
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 install(EXPORT OINetworkConfig DESTINATION share/OINetwork/cmake)
-
 export(TARGETS ${PROJECT_NAME} FILE OINetworkConfig.cmake)
 
 add_executable(${PROJECT_NAME}.test

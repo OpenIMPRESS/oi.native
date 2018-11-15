@@ -179,22 +179,79 @@ public:
 
 
 class OINetworkConnectorTest {
-    
+public:
     bool running = true;
     asio::io_service io_service;
     
-    void Client(int src, int dst) {
+    void Client(std::string GUID, std::string SocketID, OI_CLIENT_ROLE role) {
+        UDPConnector udpc("mm2.openimpress.org", 6312, io_service);
+        udpc.InitConnector(SocketID, GUID, role, true);
+        
+        ObjectPool<UDPMessageObject> bufferPool(64 , 1024);
+        WorkerQueue<UDPMessageObject> queue_in(&bufferPool);
+        udpc.RegisterQueue(OI_LEGACY_MSG_FAMILY_DATA, &queue_in, Q_IO_IN);
+        
+        std::chrono::milliseconds t0 = NOW();
+        std::chrono::milliseconds lastSent = t0;
+        std::chrono::milliseconds sendInterval = (std::chrono::milliseconds) 2000;
+        
+        while (running) {
+            { // Check if there is incomming data in A queue...
+                DataObjectAcquisition<UDPMessageObject> data_in(&queue_in, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+                if (data_in.data) {
+                    OI_LEGACY_HEADER * header = (OI_LEGACY_HEADER *) &(data_in.data->buffer[0]);
+                    uint8_t * data = (uint8_t*) &(data_in.data->buffer[sizeof(OI_LEGACY_HEADER)]);
+                    size_t data_len = data_in.data->data_end - sizeof(OI_LEGACY_HEADER);
+                    if (header->partsTotal > 1 || header->currentPart > 1) {
+                        printf("WARNING: Multipart handling not implemented yet. %d of %d", header->currentPart, header->partsTotal);
+                    } else {
+                        std::string msg_in((char*)data, data_len);
+                        printf("[%s] IN: %s\n", SocketID.c_str(), msg_in.c_str());
+                    }
+                }
+                
+                
+                if (role == OI_CLIENT_ROLE_PRODUCE && lastSent+sendInterval < NOW()) {
+                    lastSent = NOW();
+                    //udpc.se
+                    std::chrono::milliseconds tDelta = lastSent-t0;
+                    DataObjectAcquisition<UDPMessageObject> data_out(&queue_in, W_TYPE_UNUSED, W_FLOW_BLOCKING);
+                    if (data_out.data) {
+                        OI_LEGACY_HEADER * header = (OI_LEGACY_HEADER *) &(data_out.data->buffer[0]);
+                        header->packageFamily = OI_LEGACY_MSG_FAMILY_DATA;
+                        header->packageType = 0x00;
+                        header->partsTotal = 1;
+                        header->currentPart = 1;
+                        header->sequence = udpc.next_sequence_id();
+                        
+                        uint8_t * data = &(data_out.data->buffer[sizeof(OI_LEGACY_HEADER)]);
+                        int msg_bytes = sprintf((char*) data, "World Hello. T: %lld .", tDelta.count());
+                        data_out.data->data_start = 0;
+                        data_out.data->data_end = sizeof(OI_LEGACY_HEADER) + msg_bytes;
+                        //data_out.enqueue(_send_queue);
+                        printf("[%s] OUT: %s\n", SocketID.c_str(), data);
+                        data_out.data->all_endpoints = true;
+                        data_out.data->default_endpoint = false;
+                        data_out.enqueue(udpc.send_queue());
+                    }
+                }
+                
+            }
+        }
     }
     
     OINetworkConnectorTest(std::string testName) {
         srand(time(0));
         
         std::chrono::microseconds t0 = NOWu();
-        std::thread * tClient0 = new std::thread(&OINetworkConnectorTest::Client, this, 5000, 5001);
-        std::thread * tClient1 = new std::thread(&OINetworkConnectorTest::Client, this, 5001, 5000);
+        
+        std::string GUID = "54056271f3c249c88b27ad7f3045aab8";
+        
+        std::thread * tClient0 = new std::thread(&OINetworkConnectorTest::Client, this, GUID, "test2", OI_CLIENT_ROLE_CONSUME);
+        std::thread * tClient1 = new std::thread(&OINetworkConnectorTest::Client, this, GUID, "test1", OI_CLIENT_ROLE_PRODUCE);
         
         // Keep this thread alive while the client threads send the messages back and forth
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        std::this_thread::sleep_for(std::chrono::seconds(30));
         running = false;
         
         tClient0->join();
@@ -213,7 +270,8 @@ int main(int argc, char* argv[]) {
     //oi::core::network::OI_RGBD_HEADER testStruct;
     //oi::core::debugMemory(((unsigned char *) &testStruct), sizeof(oi::core::network::OI_RGBD_HEADER));
     
+    
     printf("Start\n");
-    //OINetworkTest test("1");
+    OINetworkConnectorTest test("1");
     printf("Done\n");
 }

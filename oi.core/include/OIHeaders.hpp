@@ -18,32 +18,85 @@
 
 namespace oi { namespace core {
     
+    const int MAX_UDP_PACKET_SIZE = 65500;
+    
+    const unsigned char RGBD_DATA  = 1 << 0;
+    const unsigned char AUDIO_DATA = 1 << 1;
+    const unsigned char LIVE_DATA  = 1 << 2;
+    const unsigned char BODY_DATA  = 1 << 3;
+    const unsigned char HD_DATA    = 1 << 4;
+    const unsigned char BIDX_DATA  = 1 << 5;
+
+
+    enum OI_LEGACY_MSG_FAMILY {
+        OI_LEGACY_MSG_FAMILY_MM=0x64,
+        OI_LEGACY_MSG_FAMILY_DATA=0x14,
+        
+        OI_LEGACY_MSG_FAMILY_RGBD=0x02,
+        OI_LEGACY_MSG_FAMILY_RGBD_CMD=0x12,
+        
+        OI_LEGACY_MSG_FAMILY_MOCAP=0x03,
+        OI_LEGACY_MSG_FAMILY_AUDIO=0x04,
+        OI_LEGACY_MSG_FAMILY_XR=0x10
+    };
+    
+    enum OI_MSG_TYPE_RGBD {
+        OI_MSG_TYPE_RGBD_CONFIG=0x01,
+        OI_MSG_TYPE_RGBD_DEPTH=0x11,
+        OI_MSG_TYPE_RGBD_DEPTH_BLOCK=0x12,
+        OI_MSG_TYPE_RGBD_COLOR=0x21,
+        OI_MSG_TYPE_RGBD_COLOR_BLOCK=0x22,
+        OI_MSG_TYPE_RGBD_CTRL_REQUEST=0x31,
+        OI_MSG_TYPE_RGBD_CTRL_REQUEST_JSON=0x32, // TODO: replace with content format header...
+        OI_MSG_TYPE_RGBD_CTRL_RESPONSE=0x41,
+        OI_MSG_TYPE_RGBD_CTRL_RESPONSE_JSON=0x42, // TODO: replace with content format header...
+        OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE=0x51,
+        OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK=0x52
+    };
+    
+    enum OI_MSG_TYPE_MOCAP {
+        OI_MSG_TYPE_MOCAP_CONFIG=0x01,
+        OI_MSG_TYPE_MOCAP_BODY_FRAME_KINECTV1=0x12,
+        OI_MSG_TYPE_MOCAP_BODY_FRAME_KINECTV2=0x13,
+        
+        // XSens, Vicon, OptiTrack, ...
+        OI_MSG_TYPE_HUMAN_BODY_FRAME=0x21,
+        OI_MSG_TYPE_RIGIDBODY_FRAME=0x22,
+        
+        OI_MSG_TYPE_MOCAP_LEAP_MOTION_CONFIG=0x41,
+        OI_MSG_TYPE_MOCAP_LEAP_MOTION_FRAME=0x42
+    };
+    
+    enum OI_MSG_TYPE_AUDIO {
+        OI_MSG_TYPE_AUDIO_CONFIG=0x01,
+        OI_MSG_TYPE_AUDIO_DEFAULT_FRAME=0x11
+    };
+    
+    enum OI_MSG_TYPE_XR {
+        OI_MSG_TYPE_XR_TRANSFORM=0x11,
+        OI_MSG_TYPE_XR_LINE_DRAWING=0x21,
+        OI_MSG_TYPE_XR_MESH=0x51,
+        OI_MSG_TYPE_XR_SPATIAL_MESH=0x55
+    };
+    
+    // MM header is just a single byte (0x64) in front of json...
+    
+    typedef struct {
+        uint8_t packageFamily=OI_LEGACY_MSG_FAMILY_DATA;
+        uint8_t packageType;
+        uint16_t unused2;
+        uint32_t sequence;
+        uint32_t partsTotal;
+        uint32_t currentPart;
+        uint64_t timestamp;
+    } OI_LEGACY_HEADER;
+    
     // TODO : implement this as actual flags...
     const uint8_t MSG_FLAG_DEFAULT = 0; // 0x1
     const uint8_t MSG_FLAG_HAS_MULTIPART = 1; // 0x1
     // 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80
+
     
-    enum OI_MSG_FAMILY {
-        OI_MSG_FAMILY_MM = 0x01,
-        OI_MSG_FAMILY_RGBD = 0x02,
-        OI_MSG_FAMILY_MOCAP = 0x03,
-        OI_MSG_FAMILY_AUDIO = 0x04,
-        OI_MSG_FAMILY_XR = 0x10,
-        OI_MSG_FAMILY_SAIBA = 0x60
-    };
-    
-    enum OI_CLIENT_ROLE {
-        OI_CLIENT_ROLE_PRODUCE = 1,
-        OI_CLIENT_ROLE_CONSUME = 2,
-        OI_CLIENT_ROLE_PRODUCE_CONSUME = 3
-    };
-    
-    enum OI_MESSAGE_FORMAT {
-        OI_MESSAGE_FORMAT_BINARY = 1,
-        OI_MESSAGE_FORMAT_PROTOBUF = 2,
-        OI_MESSAGE_FORMAT_STRING = 3,
-        OI_MESSAGE_FORMAT_JSON = 4
-    };
     
     typedef struct {
         uint8_t  msg_family;   //
@@ -82,6 +135,114 @@ namespace oi { namespace core {
         // encoding etc.
         // ...
     } OI_RGBD_COLOR; // ...
+    
+    
+    enum OI_MSG_FAMILY {
+        OI_MSG_FAMILY_MM = 0x01,
+        OI_MSG_FAMILY_RGBD = 0x02,
+        OI_MSG_FAMILY_MOCAP = 0x03,
+        OI_MSG_FAMILY_AUDIO = 0x04,
+        OI_MSG_FAMILY_XR = 0x10,
+        OI_MSG_FAMILY_SAIBA = 0x60
+    };
+    
+    enum OI_CLIENT_ROLE {
+        OI_CLIENT_ROLE_PRODUCE = 1,
+        OI_CLIENT_ROLE_CONSUME = 2,
+        OI_CLIENT_ROLE_PRODUCE_CONSUME = 3
+    };
+    
+    enum OI_MESSAGE_FORMAT {
+        OI_MESSAGE_FORMAT_BINARY = 1,
+        OI_MESSAGE_FORMAT_PROTOBUF = 2,
+        OI_MESSAGE_FORMAT_STRING = 3,
+        OI_MESSAGE_FORMAT_JSON = 4
+    };
+    
+    
+    typedef struct { // DO NOT REARRANGE THESE!
+        OI_LEGACY_HEADER header;
+        uint16_t   unused1 = 0x00;    // 01
+        uint16_t  frequency;        // 02-03
+        uint16_t  channels;         // 04-05
+        uint16_t  samples;          // 06-07
+        //uint64_t  timestamp;        // 08-15
+    } AUDIO_HEADER_STRUCT;
+    
+    
+    typedef struct { // DO NOT REARRANGE THESE!
+        //uint8_t  msgType = 0x03;   // 00 // 0x03 = Depth; 0x04 = Color; // 0x33 = BIDX
+        //uint8_t  deviceID = 0x00;  // 01
+        OI_LEGACY_HEADER header;
+        uint16_t unused1 = 0x00;
+        uint16_t delta_t = 0;      // 02-03 Delta milliseconds
+        uint16_t startRow = 0;     // 04-05
+        uint16_t endRow = 0;       // 06-07
+        //uint64_t timestamp;        // 08-15
+    } RGBD_HEADER_STRUCT;
+    
+    typedef struct {
+        OI_LEGACY_HEADER header;   // ...
+        uint32_t size;             // ...
+        uint8_t * data;
+    } IMG_STRUCT;
+    
+    typedef struct {
+        OI_LEGACY_HEADER header;
+        uint16_t  n_bodies;
+        uint16_t  unused1 = 0x00;
+        uint32_t  unused2 = 0x00;
+        //uint64_t timestamp;
+        // followed by BODY_STRUCT * body_data
+    } BODY_HEADER_STRUCT;
+    
+    typedef struct {
+        uint32_t tracking_id;        // 000-003
+        uint8_t left_hand_state;     // 004
+        uint8_t right_hand_state;    // 005
+        uint8_t unused1;             // 006
+        uint8_t lean_tracking_state; // 007
+        float leanX;                       // 008-011
+        float leanY;                       // 012-015
+        float joints_position[3 * 25];     // 016-315 (25*3*4)
+        uint8_t unused2;             // 316
+        uint8_t unused3;             // 317
+        uint8_t unused4;             // 318
+        uint8_t joints_tracked[25];  // 319-343
+    } BODY_STRUCT;
+    
+    typedef struct {
+        OI_LEGACY_HEADER header;
+        uint8_t  deviceID = 0x00;   // 00
+        uint8_t  deviceType = 0x02; // 01
+        uint8_t  dataFlags = 0x00;  // 02
+        uint8_t  unused1 = 0x00;    // 03 => for consistent alignment
+        uint16_t frameWidth = 0;   // 04-05
+        uint16_t frameHeight = 0;  // 06-07
+        uint16_t maxLines = 0;     // 08-09
+        uint16_t unused2 = 0;      // 10-11 => for consistent alignment
+        float Cx = 0.0f;           // 12-15
+        float Cy = 0.0f;           // 16-19
+        float Fx = 0.0f;           // 20-23
+        float Fy = 0.0f;           // 24-27
+        float DepthScale = 0.0f;   // 28-31
+        float Px = 0.0f;           // 32-35
+        float Py = 0.0f;           // 36-39
+        float Pz = 0.0f;           // 40-43
+        float Qx = 0.0f;           // 44-47
+        float Qy = 0.0f;           // 48-51
+        float Qz = 0.0f;           // 52-55
+        float Qw = 1.0f;           // 56-59
+        uint8_t unused3 = 0x00;    // 60
+        uint8_t unused4 = 0x00;    // 61
+        uint8_t unused5 = 0x00;    // 62
+        char guid[33]     = "00000000000000000000000000000000"; // 63-95
+        uint8_t unused6 = 0x00;    // 96
+        uint8_t unused7 = 0x00;    // 97
+        uint8_t unused8 = 0x00;    // 98
+        char filename[33] = "00000000000000000000000000000000"; // 99-131
+    } CONFIG_STRUCT;
+    
     
     class OIHeaderHelper {
     public:

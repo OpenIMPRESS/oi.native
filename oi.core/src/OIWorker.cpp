@@ -27,10 +27,14 @@ namespace oi { namespace core { namespace worker {
         this->_return_to_pool = _pool;
     }
     
+    DataObject::~DataObject() {
+    };
+    
     void DataObject::reset() {
         data_end = 0;
         data_start = 0;
     }
+    
     
     
 

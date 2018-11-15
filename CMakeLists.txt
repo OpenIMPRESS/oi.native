@@ -16,14 +16,19 @@ if (WIN32)
   set(CMAKE_SHARED_LIBRARY_PREFIX "")
 endif ()
 
-LIST(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake_modules" ) 
+
+SET(OI_NATIVE_ROOT "${PROJECT_SOURCE_DIR}" CACHE STRING "oi.native root source")
+SET(OI_NATIVE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake_modules" CACHE STRING "oi.native find modules")
 
 SET(OI_DEPENDS_DIR "${PROJECT_SOURCE_DIR}/../dependencies" CACHE STRING "OpenIMPRESS dependency directory")
 SET(OI_SHARED_DIR  "${PROJECT_SOURCE_DIR}/../shared" CACHE STRING "OpenIMPRESS shared resources")
 SET(OI_LIB_DIR  "${PROJECT_SOURCE_DIR}/lib" CACHE STRING "OpenIMPRESS single file library dependencies")
+
+LIST(APPEND CMAKE_MODULE_PATH ${OI_NATIVE_MODULE_PATH} ) 
 
 #add_subdirectory(oi.proto)
 add_subdirectory(oi.core)
 add_subdirectory(oi.network)
 add_subdirectory(oi.rgbd)
 add_subdirectory(oi.examples)
+add_subdirectory(oi.clients)

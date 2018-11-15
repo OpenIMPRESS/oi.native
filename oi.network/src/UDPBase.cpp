@@ -31,11 +31,11 @@ namespace oi { namespace core { namespace network {
         data_end = 0;
         data_start = 0;
         default_endpoint = true;
+        all_endpoints = false;
     }
     
     UDPBase::UDPBase(int listenPort, int sendPort, std::string sendHost, asio::io_service & io_service)
     : _io_service(io_service), _socket(io_service, udp::endpoint(udp::v4(), listenPort)), _resolver(io_service) {
-        this->_listen_port = listenPort;
         this->_send_port = sendPort;
         this->_send_host = sendHost;
         asio::socket_base::send_buffer_size option_set(65500);
@@ -77,7 +77,7 @@ namespace oi { namespace core { namespace network {
         if (_sender_initialized) return -1;
         
         _send_pool = send_pool;
-        _queue_send = new worker::WorkerQueue<UDPMessageObject>(send_pool);
+        _queue_send = new worker::WorkerQueue<UDPMessageObject>(_send_pool);
         _send_thread = new std::thread(&UDPBase::DataSender, this);
         _sender_initialized = true; // Todo wait/check if sender really starts in thread?
         return 1;
@@ -196,8 +196,10 @@ namespace oi { namespace core { namespace network {
             try {
                 // TODO: should we start from buffer[..data_start] ?
                 if (doa_s.data->default_endpoint) doa_s.data->endpoint = _endpoint;
-                //printf("Unqueued sending task: %s:%d\n", doa_s.data->endpoint.address().to_string().c_str(), doa_s.data->endpoint.port());
-                _socket.send_to(asio::buffer(doa_s.data->buffer, doa_s.data->data_end),
+                size_t data_len = doa_s.data->data_end-doa_s.data->data_start;
+                //printf("Unqueued OUT (%ld bytes): %s:%d (Default? %n)\n",
+                //       data_len, doa_s.data->endpoint.address().to_string().c_str(), doa_s.data->endpoint.port(), doa_s.data->default_endpoint);
+                _socket.send_to(asio::buffer(&(doa_s.data->buffer[doa_s.data->data_start]), data_len),
                                 doa_s.data->endpoint, mf, ec);
             } catch (std::exception& e) {
                 std::cerr << "Exception while sending (Code " << ec << "): " << e.what() << std::endl;
@@ -206,6 +208,7 @@ namespace oi { namespace core { namespace network {
             }
         }
         
+        printf("END DATA SENDER");
         return 0;
     }
     
@@ -222,20 +225,25 @@ namespace oi { namespace core { namespace network {
                 
                 // Unless we have queues specified for use OI data_type headers
                 if (_queue_map.size() > 0) {
-                    uint16_t peek_type;
+                    uint8_t peek_type;
                     asio::socket_base::message_flags mfPeek = 0x2; // for unix, could be different for windows sockets?
                     size_t len_peek = _socket.receive_from(asio::buffer(&peek_type, sizeof(peek_type)), recv_endpoint, mfPeek, ec);
                     if (!_running) {
                         break;
                     } else if (ec) {
                         printf("Error peeking %s\n", ec.message().c_str());
-                        continue;
+                        break;
                     } else if (len_peek != sizeof(peek_type)) {
                         printf("Failed peeking datatype (%ld bytes read instead of %ld)\n", len_peek, sizeof(peek_type));
                         continue;
                     }
-                    std::pair<uint16_t, worker::Q_IO> key = std::make_pair(peek_type, worker::Q_IO_IN);
-                    if (_queue_map.count(key) == 1) q = _queue_map[key];
+                    std::pair<uint8_t, worker::Q_IO> key = std::make_pair(peek_type, worker::Q_IO_IN);
+                    if (_queue_map.count(key) == 1) {
+                        //printf("Unqueued IN (peek): %d (HAVE QUEUE)\n", peek_type);
+                        q = _queue_map[key];
+                    } else {
+                        printf("Unqueued IN (peek): %d (NO QUEUE)\n", peek_type);
+                    }
                 }
                 
                 // will throw exception on timeout

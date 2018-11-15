@@ -16,7 +16,6 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
 #pragma once
 
-#include <asio.hpp>
 #include "json.hpp"
 #include "UDPBase.hpp"
 #include "OIHeaders.hpp"
@@ -36,8 +35,13 @@ namespace oi { namespace core { namespace network {
     
     class UDPConnector : public UDPBase {
     public:
-        UDPConnector(int listenPort, int sendPort, std::string sendHost, asio::io_service& io_service);
+        UDPConnector(std::string sendHost, int sendPort, asio::io_service& io_service);
+        UDPConnector(std::string sendHost, int sendPort, int listenPort, asio::io_service& io_service);
+        
+        
         int InitConnector(std::string sid, std::string guid, oi::core::OI_CLIENT_ROLE role, bool useMM);
+        int InitConnector(std::string sid, std::string guid, oi::core::OI_CLIENT_ROLE role, bool useMM, worker::ObjectPool<UDPMessageObject> * obj_pool);
+        
         
         int AddEndpoint(std::string host, std::string port);
         int AddEndpoint(asio::ip::udp::endpoint endpoint);
@@ -54,12 +58,19 @@ namespace oi { namespace core { namespace network {
         uint32_t next_sequence_id();
     private:
         void Close();
+        
+        std::mutex _m_endpoints;
         std::map<std::pair<std::string, uint16_t>, UDPEndpoint *> endpoints;
         
         // Communication with matchmaking server
         void Update();
         void Register();
         void Punch(UDPEndpoint * udpep);
+        int MMSend(std::string json_str);
+        int MMSend(std::string json_str, asio::ip::udp::endpoint);
+        
+        int DataSender();
+        
         std::string get_local_ip();
         std::chrono::milliseconds HBInterval;
         std::chrono::milliseconds connectionTimeout;

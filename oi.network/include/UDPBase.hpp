@@ -28,12 +28,14 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 
 namespace oi { namespace core { namespace network {
     
+    
     class UDPMessageObject : public worker::DataObject {
     public:
         UDPMessageObject(size_t buffer_size, worker::ObjectPool<UDPMessageObject> * _pool);
         asio::ip::udp::endpoint endpoint;
         virtual ~UDPMessageObject();
         bool default_endpoint = true;
+        bool all_endpoints = false;
         void reset();
     };
     
@@ -82,6 +84,7 @@ namespace oi { namespace core { namespace network {
         
         bool connected();
     protected:
+        
         bool _connected;
         std::condition_variable send_cv;
         int DataListener();

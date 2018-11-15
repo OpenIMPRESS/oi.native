@@ -32,26 +32,39 @@ namespace oi { namespace core { namespace network {
         endpoint = ep;
     }
     
-    UDPConnector::UDPConnector(int listenPort, int sendPort, std::string sendHost, asio::io_service& io_service) :
-    UDPBase(listenPort, sendPort, sendHost, io_service) {
-    }
+    UDPConnector::UDPConnector(std::string sendHost, int sendPort, asio::io_service& io_service) :
+    UDPBase(0, sendPort, sendHost, io_service) {}
+    
+    UDPConnector::UDPConnector(std::string sendHost, int sendPort, int listenPort, asio::io_service& io_service) :
+    UDPBase(listenPort, sendPort, sendHost, io_service) {}
     
     int UDPConnector::InitConnector(std::string sid, std::string guid, OI_CLIENT_ROLE role, bool useMM) {
+        return InitConnector(sid, guid, role, useMM, new worker::ObjectPool<UDPMessageObject>(64, 4096));
+    }
+    
+    int UDPConnector::InitConnector(std::string sid, std::string guid, OI_CLIENT_ROLE role, bool useMM, worker::ObjectPool<UDPMessageObject> * obj_pool) {
         this->socketID = sid;
         this->guid = guid;
         this->role = role;
         this->_useMM = useMM;
-        _mm_buffer_pool = new worker::ObjectPool<UDPMessageObject>(64, 4096);
         
-        if (useMM) {
+        _mm_buffer_pool = obj_pool;
+        
+        //if (useMM) {
             _mm_receive_queue = new worker::WorkerQueue<UDPMessageObject>(_mm_buffer_pool);
-            UDPBase::Init(_mm_buffer_pool);
-            UDPBase::RegisterQueue((uint8_t) oi::core::OI_MSG_FAMILY_MM, _mm_receive_queue, worker::Q_IO_IN);
-            
             localIP = get_local_ip();
-        } else {
-            UDPBase::Init(_mm_buffer_pool);
-        }
+            UDPBase::InitReceiver(_mm_buffer_pool);
+            
+            // Manually initialize sender with UDPConnector implementation
+            _send_pool = _mm_buffer_pool;
+            _queue_send = new worker::WorkerQueue<UDPMessageObject>(_send_pool);
+            _send_thread = new std::thread(&UDPConnector::DataSender, this);
+            _sender_initialized = true;
+            
+            UDPBase::RegisterQueue((uint8_t) oi::core::OI_LEGACY_MSG_FAMILY_MM, _mm_receive_queue, worker::Q_IO_IN);
+        //} else {
+        //    UDPBase::Init(_mm_buffer_pool);
+        //}
         
         endpoints.clear();
         
@@ -74,15 +87,33 @@ namespace oi { namespace core { namespace network {
         return _sequence_id;
     }
     
+    int UDPConnector::AddEndpoint(std::string host, std::string port) {
+        asio::ip::udp::endpoint ep = GetEndpoint(host, port);
+        return AddEndpoint(ep);
+    }
+    
+    int UDPConnector::AddEndpoint(asio::ip::udp::endpoint ep) {
+        std::unique_lock<std::mutex> lk(_m_endpoints);
+        int res = 0;
+        std::pair<std::string, uint16_t> epkey = std::make_pair(ep.address().to_string(), (uint16_t) ep.port());
+        if (endpoints.count(epkey) < 1) {
+            endpoints[epkey] = new UDPEndpoint(ep);
+            res = 1;
+        } else {
+            endpoints[epkey]->endpoint = ep;
+        }
+        
+        Punch(endpoints[epkey]);
+        Punch(endpoints[epkey]);
+        return res;
+    }
+    
+    
     // This thread (re-)establishes connection, seends heartbeats, etc.
     void UDPConnector::Update() {
         _running = true;
         while (_running) {
             milliseconds currentTime = oi::core::NOW();
-            
-            // for each cliend handle heartbeat...
-            // ...
-            
             
             // SEND REGISTER
             if (_useMM && !_connected && currentTime>mm_lastRegister + mm_registerInterval) {
@@ -90,33 +121,63 @@ namespace oi { namespace core { namespace network {
                 mm_lastRegister = currentTime;
             }
             
-            // UPDATE STATE
-            /* FOR EACH ENDPOINT
-            if (_connected && currentTime > lastReceivedHB + connectionTimeout) {
-                _connected = false;
-            }
-            
-            
-            // SEND HEARTBEAT/PUNCH
-            if (_connected) {
-                if (currentTime > lastSentHB + HBInterval) {
-                    lastSentHB = currentTime;
-                    Punch();
+            // for each cliend handle heartbeat...
+            {
+                std::unique_lock<std::mutex> lk(_m_endpoints);
+                map<std::pair<std::string, uint16_t>, UDPEndpoint *>::iterator ep_it;
+                for (ep_it = endpoints.begin(); ep_it != endpoints.end(); ep_it++) {
+                    if (ep_it->second->connected && currentTime > ep_it->second->lastReceivedHB + connectionTimeout) {
+                        ep_it->second->connected = false;
+                    }
+                    
+                    // ep_it->second->connected &&
+                    if (currentTime > ep_it->second->lastSentHB + HBInterval) {
+                        ep_it->second->lastSentHB = currentTime;
+                        Punch(ep_it->second);
+                    }
                 }
             }
-             */
             
-            // FORWARD DATA TO CLIENT
-            //worker::DataObjectAcquisition<UDPMessageObject> c_dat(_queue_send_client, worker::W_TYPE_QUEUED, worker::W_FLOW_NONBLOCKING);
-            //if (c_dat.data) {
-                // TODO: Explicitly set endpoint?
-                // Else, do we need to add byte prefix?
+            { // Handle incomming messages
+                worker::DataObjectAcquisition<UDPMessageObject> mmdata(_mm_receive_queue, oi::core::worker::W_TYPE_QUEUED, oi::core::worker::W_FLOW_NONBLOCKING);
+                if (!mmdata.data) continue;
+                uint8_t magicByte = mmdata.data->buffer[0];
+                if (magicByte == OI_LEGACY_MSG_FAMILY_MM) {
+                    json j = json::parse(&mmdata.data->buffer[1], &mmdata.data->buffer[mmdata.data->data_end]);
+                    if (j["type"] == "answer") {
+                        string host = j.at("address").get<string>();
+                        string port = to_string(j.at("port").get<int>());
+                        asio::ip::udp::endpoint ep = UDPBase::GetEndpoint(host, port);
+                        printf("Start talking to: %s:%s\n",
+                               host.c_str(), port.c_str());
+                        printf("Endpoint: %s:%d\n",
+                               ep.address().to_string().c_str(), ep.port());
+                        
+                        
+                    } else if (j["type"] == "punch") {
+                        // Heartbeat/punch...
+                        
+                        std::unique_lock<std::mutex> lk(_m_endpoints);
+                        std::pair<std::string, uint16_t> epkey = std::make_pair(mmdata.data->endpoint.address().to_string(), (uint16_t) mmdata.data->endpoint.port());
+                        if (endpoints.count(epkey) == 1) {
+                            endpoints[epkey]->lastReceivedHB = oi::core::NOW();
+                            endpoints[epkey]->connected = true;
+                            _connected = true;
+                        } else {
+                            //UDPEndpoint * n_udpe = new UDPEndpoint(mmdata.data->endpoint);
+                            printf("Received heartbeat from unknown endpoint: %s:%d\n",
+                                   mmdata.data->endpoint.address().to_string().c_str(),
+                                   mmdata.data->endpoint.port());
+                        }
+                    }
+                } else {
+                    printf("ERROR: Unhandled message %d", (int) magicByte);
+                }
                 
-            //    c_dat.enqueue(_queue_send);
-            //}
+            }
             
-            worker::DataObjectAcquisition<UDPMessageObject> mmdata(_mm_receive_queue, oi::core::worker::W_TYPE_QUEUED, oi::core::worker::W_FLOW_NONBLOCKING);
-            if (!mmdata.data) continue;
+            
+            /* TODO: new headers
             OI_MSG_HEADER * oi_header = (OI_MSG_HEADER *) &(mmdata.data->buffer[0]);
             
             uint8_t * data = (uint8_t*) &(mmdata.data->buffer[oi_header->body_start]);
@@ -158,9 +219,9 @@ namespace oi { namespace core { namespace network {
                                mmdata.data->endpoint.port());
                     }
                 }
-            }
+            }*/
             
-            /*
+            /* outgoing...
             uint8_t magicByte = data[0];
             if (magicByte == 0x63) {
             } else if (magicByte == 0x6D) { // 'm', multipart client data
@@ -219,15 +280,38 @@ namespace oi { namespace core { namespace network {
         return OISendString(msg_family, msg_type, msg, oimf, _endpoint);
     }
     
+    
+    int UDPConnector::MMSend(std::string json_str) {
+        return MMSend(json_str, _endpoint);
+    }
+    
+    int UDPConnector::MMSend(std::string json_str, asio::ip::udp::endpoint ep) {
+        //if (!_useMM) { printf("ERROR sending MM message: not using matchmaking.\n"); return -1; }
+        worker::DataObjectAcquisition<UDPMessageObject> data_send(send_queue(), oi::core::worker::W_TYPE_UNUSED, oi::core::worker::W_FLOW_BLOCKING);
+        if (!data_send.data)  { printf("ERROR sending MM message: no free buffer.\n"); return -1; }
+        data_send.data->buffer[0] = OI_LEGACY_MSG_FAMILY_MM;
+        memcpy(&(data_send.data->buffer[1]), json_str.c_str(), json_str.length());
+        data_send.data->data_start = 0;
+        data_send.data->data_end = json_str.length()+1;
+        data_send.data->endpoint = ep;
+        data_send.data->default_endpoint = false;
+        data_send.enqueue(send_queue());
+        
+        return json_str.length()+1;
+    }
+    
     void UDPConnector::Register() {
         if (!_useMM) return;
         json register_msg;
-        register_msg["type"] = "register";
+        register_msg["packageType"] = "register";
         register_msg["socketID"] = socketID;
-        register_msg["isSender"] = (string)(role==OI_CLIENT_ROLE_PRODUCE ? "true" : "false");
+        register_msg["isSender"] = role == OI_CLIENT_ROLE_PRODUCE;
         register_msg["localIP"] = localIP;
         register_msg["UID"] = guid;
-        OISendString(OI_MSG_FAMILY_MM, 0x00, register_msg.dump(), OI_MESSAGE_FORMAT_JSON);
+        
+        printf("REGISTER: %s\n", register_msg.dump().c_str());
+        
+        MMSend(register_msg.dump());
         
         //stringstream ss;
         //ss << "d{\"packageType\":\"register\",\"socketID\":\"" << socketID << "\",\"isSender\":" << (string)(is_sender ? "true" : "false") << ",\"localIP\":\"" << localIP << "\",\"UID\":\"" << guid << "\"}";
@@ -237,10 +321,59 @@ namespace oi { namespace core { namespace network {
     
     void UDPConnector::Punch(UDPEndpoint * udpep) {
         // TODO: header!
-        json register_msg;
-        register_msg["type"] = "punch";
+        json punch_msg;
+        punch_msg["type"] = "punch";
         udpep->lastSentHB = NOW();
-        OISendString(OI_MSG_FAMILY_MM, 0x00, register_msg.dump(), OI_MESSAGE_FORMAT_JSON, udpep->endpoint);
+        MMSend(punch_msg.dump(), udpep->endpoint);
+        //OISendString(OI_MSG_FAMILY_MM, 0x00, register_msg.dump(), OI_MESSAGE_FORMAT_JSON, udpep->endpoint);
+    }
+    
+    int UDPConnector::DataSender() {
+        _running = true;
+        while (_running) {
+            worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_TYPE_QUEUED, worker::W_FLOW_BLOCKING);
+            if (!_running || !doa_s.data) continue;
+            
+            asio::error_code ec;
+            asio::socket_base::message_flags mf = 0;
+            try {
+                // TODO: should we start from buffer[..data_start] ?
+                vector<asio::ip::udp::endpoint> targets;
+                
+                if (doa_s.data->default_endpoint) {
+                    targets.push_back(_endpoint);
+                } else if (!doa_s.data->all_endpoints) {
+                    targets.push_back(doa_s.data->endpoint);
+                }
+                
+                if (doa_s.data->all_endpoints) {
+                    std::unique_lock<std::mutex> lk(_m_endpoints);
+                    map<std::pair<std::string, uint16_t>, UDPEndpoint *>::iterator ep_it;
+                    for (ep_it = endpoints.begin(); ep_it != endpoints.end(); ep_it++) {
+                        // TODO: implement clients subscribing to certain packets
+                        //if (ep_it->second->connected) {
+                            targets.push_back(ep_it->second->endpoint);
+                        //}
+                    }
+                }
+                
+                size_t data_len = doa_s.data->data_end-doa_s.data->data_start;
+                
+                for(std::vector<asio::ip::udp::endpoint>::iterator it = targets.begin(); it != targets.end(); ++it) {
+                    //printf("Unqueued OUT (%ld bytes): %s:%d\n", data_len, it->address().to_string().c_str(), it->port());
+                    _socket.send_to(asio::buffer(&(doa_s.data->buffer[doa_s.data->data_start]), data_len), *it, mf, ec);
+                }
+                
+                
+            } catch (std::exception& e) {
+                std::cerr << "Exception while sending (Code " << ec << "): " << e.what() << std::endl;
+                _running = false;
+                return -1;
+            }
+        }
+        
+        printf("END DATA SENDER");
+        return 0;
     }
     
     std::string UDPConnector::get_local_ip() {
@@ -249,8 +382,8 @@ namespace oi { namespace core { namespace network {
             asio::io_service netService;
             tcp::resolver resolver(netService);
             tcp::resolver::query query(tcp::v4(), "google.com", "80");
-            tcp::resolver::iterator endpoints = resolver.resolve(query);
-            tcp::endpoint ep = *endpoints;
+            tcp::resolver::iterator _endpoints = resolver.resolve(query);
+            tcp::endpoint ep = *_endpoints;
             tcp::socket socket(netService);
             socket.connect(ep);
             asio::ip::address addr = socket.local_endpoint().address();

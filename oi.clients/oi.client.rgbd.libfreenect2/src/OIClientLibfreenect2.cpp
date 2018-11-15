@@ -14,8 +14,25 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
-#pragma once
 
-namespace oi { namespace core { namespace rgbd {
+#include <iostream>
+#include <cstdlib>
+#include <signal.h>
+
+#include <RGBDStreamer.hpp>
+#include <LibFreenect2DeviceInterface.hpp>
+
+using namespace oi::core::rgbd;
+using namespace oi::client::libfreenect2;
+
+asio::io_service io_service;
+
+int main(int argc, char *argv[]) {
+    RGBDStreamerConfig config(argc, argv);
+    LibFreenect2DeviceInterface device(config.deviceSerial, config.pipeline, 0.1f, config.maxDepth);
+    RGBDStreamer streamer(device, config, io_service);
     
-} } }
+    while (true) {
+        device.Cycle(&streamer);
+    }
+}
