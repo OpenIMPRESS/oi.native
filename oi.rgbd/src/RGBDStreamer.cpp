@@ -241,8 +241,8 @@ int RGBDStreamer::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_s
     return data_len;
 }
 
-int RGBDStreamer::QueueBodyFrame(BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp) {
-    return -1;
+int RGBDStreamer::QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp) {
+	return -1;
 }
 
 int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depthdata, std::chrono::milliseconds timestamp) {

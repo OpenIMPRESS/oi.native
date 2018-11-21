@@ -83,7 +83,7 @@ int LibFreenect2DeviceInterface::OpenDevice() {
 #endif
     } else if (pipeline_name.compare("cuda") == 0) {
 #ifdef LIBFREENECT2_WITH_CUDA_SUPPORT
-        pipeline = new libfreenect2::CudaPacketPipeline(-1);
+        pipeline = new ::libfreenect2::CudaPacketPipeline(-1);
 #else
         std::cerr << "CUDA pipeline is not supported!" << std::endl;
         return  -1;

@@ -73,7 +73,7 @@ namespace oi { namespace core { namespace rgbd {
         int UpdateStreamConfig(CONFIG_STRUCT cfg);
         
         int QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp);
-        int QueueBodyFrame(BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp);
+        int QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp);
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depthdata, std::chrono::milliseconds timestamp);
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint16_t * depthdata, std::chrono::milliseconds timestamp);
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depth_any, uint16_t * depth_ushort, std::chrono::milliseconds timestamp);

@@ -222,13 +222,14 @@ namespace oi { namespace core { namespace network {
             try {
                 // Read data into default receive queue
                 worker::WorkerQueue<UDPMessageObject> * q = _queue_receive;
-                
+                /*
                 // Unless we have queues specified for use OI data_type headers
                 if (_queue_map.size() > 0) {
                     uint8_t peek_type;
                     asio::socket_base::message_flags mfPeek = 0x2; // for unix, could be different for windows sockets?
                     size_t len_peek = _socket.receive_from(asio::buffer(&peek_type, sizeof(peek_type)), recv_endpoint, mfPeek, ec);
-                    if (!_running) {
+                    
+					if (!_running) {
                         break;
                     } else if (ec) {
                         printf("Error peeking %s\n", ec.message().c_str());
@@ -245,9 +246,12 @@ namespace oi { namespace core { namespace network {
                         printf("Unqueued IN (peek): %d (NO QUEUE)\n", peek_type);
                     }
                 }
+				*/
                 
                 // will throw exception on timeout
                 worker::DataObjectAcquisition<UDPMessageObject> doa_r(q, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
+
+				worker::WorkerQueue<UDPMessageObject> * return_queue = q;
                 if (!_running) break;
                 
                 size_t len = _socket.receive_from(asio::buffer(doa_r.data->buffer, doa_r.data->buffer_size), recv_endpoint, mf, ec);
@@ -260,7 +264,19 @@ namespace oi { namespace core { namespace network {
                     doa_r.data->data_start = 0;
                     doa_r.data->data_end = len;
                     doa_r.data->endpoint = recv_endpoint;
-                    doa_r.enqueue();
+
+					if (_queue_map.size() > 0) {
+						uint8_t peek_type = doa_r.data->buffer[0];
+						std::pair<uint8_t, worker::Q_IO> key = std::make_pair(peek_type, worker::Q_IO_IN);
+						if (_queue_map.count(key) == 1) {
+							//printf("Unqueued IN (peek): %d (HAVE QUEUE)\n", peek_type);
+							return_queue = _queue_map[key];
+						} else {
+							printf("Unqueued IN (peek): %d (NO QUEUE)\n", peek_type);
+						}
+					}
+
+					doa_r.enqueue(return_queue);
                 }
             } catch (std::exception& e) {
                 printf("Exception while receiving %s", e.what());
