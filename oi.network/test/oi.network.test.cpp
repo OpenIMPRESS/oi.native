@@ -50,7 +50,7 @@ typedef struct {
 class OINetworkTest {
 public:
     
-    int runs = 0;
+    uint32_t runs = 0;
     bool running = true;
     asio::io_service io_service;
     
@@ -78,7 +78,7 @@ public:
         uint32_t received_b = 0;
         uint32_t sent_b = 0;
         
-        printf("Starting send: %d, A pool_size: %ld, B pool_size: %ld\n", src, bufferPool.pool_size(), bufferPool.pool_size());
+        printf("Starting send: %d, A pool_size: %zd, B pool_size: %zd\n", src, bufferPool.pool_size(), bufferPool.pool_size());
         
         
         TEST_PACKET_A packet_send_a;
