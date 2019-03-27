@@ -1,3 +1,6 @@
 [submodule "dependencies/asio"]
 	path = dependencies/asio
 	url = https://github.com/chriskohlhoff/asio.git
+[submodule "oi.clients/oi.client.rgbd.kinectsdk2"]
+	path = oi.clients/oi.client.rgbd.kinectsdk2
+	url = https://github.com/OpenIMPRESS/oi.client.rgbd.kinectsdk2.git
