@@ -20,7 +20,7 @@ endif ()
 SET(OI_NATIVE_ROOT "${PROJECT_SOURCE_DIR}" CACHE STRING "oi.native root source")
 SET(OI_NATIVE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake_modules" CACHE STRING "oi.native find modules")
 
-SET(OI_DEPENDS_DIR "${PROJECT_SOURCE_DIR}/../dependencies" CACHE STRING "OpenIMPRESS dependency directory")
+SET(OI_DEPENDS_DIR "${PROJECT_SOURCE_DIR}/dependencies" CACHE STRING "OpenIMPRESS dependency directory")
 SET(OI_SHARED_DIR  "${PROJECT_SOURCE_DIR}/../shared" CACHE STRING "OpenIMPRESS shared resources")
 SET(OI_LIB_DIR  "${PROJECT_SOURCE_DIR}/lib" CACHE STRING "OpenIMPRESS single file library dependencies")
 
