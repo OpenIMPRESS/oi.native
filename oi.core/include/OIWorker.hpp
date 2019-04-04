@@ -31,7 +31,10 @@ namespace oi { namespace core { namespace worker {
     enum Q_IO { Q_IO_IN, Q_IO_MIDDLEWARE, Q_IO_OUT };
     
     template <class DataObjectT>
-    class DataObjectAcquisition;
+	class DataObjectAcquisition;
+
+	template <class DataObjectT>
+	class WorkerQueue;
     
     template <class DataObjectT>
     class ObjectPool {
@@ -44,11 +47,10 @@ namespace oi { namespace core { namespace worker {
         std::mutex _m_wait; // move to private?
     private:
         void _return(std::unique_ptr<DataObjectT> p);
+		std::unique_ptr<DataObjectT> _get_data(W_FLOW f, int32_t timeout);
     template<class>
     friend class DataObjectAcquisition;
     };
-    
-    
     
     class DataObject {
     public:
@@ -60,31 +62,33 @@ namespace oi { namespace core { namespace worker {
         virtual void reset();
         virtual ~DataObject();
     private:
-        // TODO: could be stack?
         ObjectPool<DataObject> * _return_to_pool;
+		std::queue<WorkerQueue<DataObject> *> _workers;
     template<class>
     friend class DataObjectAcquisition;
+	template<class>
+	friend class ObjectPool;
     };
     
     template <class DataObjectT>
     class WorkerQueue {
         static_assert(std::is_base_of<DataObject, DataObjectT>::value, "DataObjectT in WorkerQueue must derive from DataObject");
     public:
-        WorkerQueue(ObjectPool<DataObjectT> * objectPool);
+        WorkerQueue();
         ~WorkerQueue();
-        ObjectPool<DataObjectT> * object_pool();
+        //ObjectPool<DataObjectT> * object_pool();
         void close();
         void notify_all();
     protected:
-        std::unique_ptr<DataObjectT> _get_data(W_TYPE t, W_FLOW f);
+        std::unique_ptr<DataObjectT> _get_data(W_FLOW f, int32_t timeout);
         void _enqueue(std::unique_ptr<DataObjectT> p);
         std::queue<std::unique_ptr<DataObjectT>> _queue_ready;
         std::condition_variable have_queued_cv;
         std::mutex _m_ready;
         std::mutex _m_wait;
         std::atomic<bool> _running;
-        ObjectPool<DataObjectT> * _object_pool;
-    friend class DataObjectAcquisition<DataObjectT>;
+        //ObjectPool<DataObjectT> * _object_pool;
+	friend class DataObjectAcquisition<DataObjectT>;
     };
     
     // Simple wrapper of an input and output queue using the same object pool
@@ -130,10 +134,15 @@ namespace oi { namespace core { namespace worker {
     class DataObjectAcquisition {
         static_assert(std::is_base_of<DataObject, DataObjectT>::value, "DataObjectT in DataObjectTRef must derive from DataObject");
     public:
-        explicit DataObjectAcquisition(WorkerQueue<DataObjectT> * q, W_TYPE t, W_FLOW f);
+        explicit DataObjectAcquisition(ObjectPool<DataObjectT> * p);
+		explicit DataObjectAcquisition(ObjectPool<DataObjectT> * p, int32_t timeout);
+		explicit DataObjectAcquisition(ObjectPool<DataObjectT> * p, W_FLOW f);
+		explicit DataObjectAcquisition(WorkerQueue<DataObjectT> * q);
+		explicit DataObjectAcquisition(WorkerQueue<DataObjectT> * q, int32_t timeout);
+		explicit DataObjectAcquisition(WorkerQueue<DataObjectT> * q, W_FLOW f);
         ~DataObjectAcquisition();
         void enqueue(WorkerQueue<DataObjectT> * q);
-        void enqueue();
+		void next();
         void release();
         std::unique_ptr<DataObjectT> data;
         
@@ -142,11 +151,10 @@ namespace oi { namespace core { namespace worker {
         DataObjectAcquisition(DataObjectAcquisition&& that);
         DataObjectAcquisition& operator=(DataObjectAcquisition&& that);
     private:
-        W_TYPE _ref_obj_type;
-        ObjectPool<DataObject>  * _return_to; // ...
-        WorkerQueue<DataObjectT> * _enqueue_next;
+        //ObjectPool<DataObjectT>  * _return_to; // ...
+        //WorkerQueue<DataObjectT> * _enqueue_next;
         //WorkerQueue<DataObjectT> * _next;
-        bool _enqueue;
+        bool _continue;
     };
     
     class OIError : public std::runtime_error {
@@ -175,6 +183,8 @@ namespace oi { namespace core { namespace worker {
     void ObjectPool<DataObjectT>::_return(std::unique_ptr<DataObjectT> p) {
         if (!p) throw OIError("Returned NULL.");
         std::unique_lock<std::mutex> lk(_m_unused);
+		p->reset();
+		p->_workers = {};
         _queue_unused.push(std::move(p));
         have_unused_cv.notify_one();
     }
@@ -182,16 +192,17 @@ namespace oi { namespace core { namespace worker {
     
     
     template <class DataObjectT>
-    WorkerQueue<DataObjectT>::WorkerQueue(ObjectPool<DataObjectT> * objectPool) {
-        _object_pool = objectPool;
+    WorkerQueue<DataObjectT>::WorkerQueue() {
+        //_object_pool = objectPool;
         _running = true;
     }
     
+	/*
     template <class DataObjectT>
     ObjectPool<DataObjectT> * WorkerQueue<DataObjectT>::object_pool() {
         return _object_pool;
     }
-    
+    */
     
     template <class DataObjectT>
     WorkerQueue<DataObjectT>::~WorkerQueue() {
@@ -208,7 +219,7 @@ namespace oi { namespace core { namespace worker {
     
     template <class DataObjectT>
     void WorkerQueue<DataObjectT>::notify_all() {
-        _object_pool->have_unused_cv.notify_all();
+        //_object_pool->have_unused_cv.notify_all();
         have_queued_cv.notify_all();
     }
     
@@ -221,100 +232,114 @@ namespace oi { namespace core { namespace worker {
     }
     
     template <class DataObjectT>
-    std::unique_ptr<DataObjectT> WorkerQueue<DataObjectT>::_get_data(W_TYPE t, W_FLOW f) {
-        if (t == W_TYPE_QUEUED) {
-            std::unique_lock<std::mutex> lk(_m_ready);
-            //while (_running && f == W_FLOW_BLOCKING && _queue_ready.empty()) {
-            if (_running && f == W_FLOW_BLOCKING && _queue_ready.empty()) {
-                lk.unlock();
-                std::unique_lock<std::mutex> lk2(_m_wait);
-                //have_queued_cv.wait_for(lk2, std::chrono::milliseconds(1000)); // , [this]{ return !_queue_ready.empty(); }
-                have_queued_cv.wait(lk2);
-                lk.lock();
-            }
-            if (_queue_ready.empty()) return std::unique_ptr<DataObjectT>(nullptr);
-            std::unique_ptr<DataObjectT> res(std::move(_queue_ready.front()));
-            _queue_ready.pop();
-            return res;
-        } else if (t == W_TYPE_UNUSED) {
-            std::unique_lock<std::mutex> lk(_object_pool->_m_unused);
-            //while (_running && f == W_FLOW_BLOCKING && _object_pool->_queue_unused.empty()) {
-            if (_running && f == W_FLOW_BLOCKING && _object_pool->_queue_unused.empty()) {
-                lk.unlock();
-                std::unique_lock<std::mutex> lk2(_object_pool->_m_wait);
-                //_object_pool->have_unused_cv.wait_for(lk2, std::chrono::milliseconds(1000)); // , [this]{ return !_object_pool->_queue_unused.empty(); }
-                _object_pool->have_unused_cv.wait(lk2);
-                lk.lock();
-            }
-            if (_object_pool->_queue_unused.empty()) return std::unique_ptr<DataObjectT>(nullptr);
-            std::unique_ptr<DataObjectT> res(std::move(_object_pool->_queue_unused.front()));
-            _object_pool->_queue_unused.pop();
-            return res;
-        } else {
-            return std::unique_ptr<DataObjectT>(nullptr);
-        }
+    std::unique_ptr<DataObjectT> WorkerQueue<DataObjectT>::_get_data(W_FLOW f, int32_t timeout) {
+		std::unique_lock<std::mutex> lk(_m_ready);
+		if (_running && f == W_FLOW_BLOCKING && _queue_ready.empty()) {
+			lk.unlock();
+			std::unique_lock<std::mutex> lk2(_m_wait);
+			if (timeout >= 0) have_queued_cv.wait_for(lk2, std::chrono::milliseconds(timeout));
+			else have_queued_cv.wait(lk2);
+			lk.lock();
+		}
+		if (_queue_ready.empty()) return std::unique_ptr<DataObjectT>(nullptr);
+		std::unique_ptr<DataObjectT> res(std::move(_queue_ready.front()));
+		_queue_ready.pop();
+		return res;
     }
-    
+
+	template <class DataObjectT>
+	std::unique_ptr<DataObjectT> ObjectPool<DataObjectT>::_get_data(W_FLOW f, int32_t timeout) {
+		std::unique_lock<std::mutex> lk(_m_unused);
+		if (f == W_FLOW_BLOCKING && _queue_unused.empty()) {
+			lk.unlock();
+			std::unique_lock<std::mutex> lk2(_m_wait);
+			if (timeout >= 0) have_unused_cv.wait_for(lk2, std::chrono::milliseconds(timeout));
+			else have_unused_cv.wait(lk2);
+			lk.lock();
+		}
+		if (_queue_unused.empty()) return std::unique_ptr<DataObjectT>(nullptr);
+		std::unique_ptr<DataObjectT> res(std::move(_queue_unused.front()));
+		_queue_unused.pop();
+		return res;
+	}
+
+	template <class DataObjectT>
+	DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(ObjectPool<DataObjectT> * op)
+		: data(op->_get_data(W_FLOW_NONBLOCKING, -1)) {
+		_continue = true;
+	};
+
+	template <class DataObjectT>
+	DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(ObjectPool<DataObjectT> * op, int32_t timeout)
+		: data(op->_get_data(W_FLOW_BLOCKING, timeout)) {
+		_continue = true;
+	};
+
+	template <class DataObjectT>
+	DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(ObjectPool<DataObjectT> * op, W_FLOW f)
+		: data(op->_get_data(f, -1)) {
+		_continue = true;
+	};
+
+	template <class DataObjectT>
+	DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(WorkerQueue<DataObjectT> * q)
+		: data(q->_get_data(W_FLOW_NONBLOCKING, -1)) {
+		_continue = true;
+	};
+
+	template <class DataObjectT>
+	DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(WorkerQueue<DataObjectT> * q, int32_t timeout)
+		: data(q->_get_data(W_FLOW_BLOCKING, timeout)) {
+		_continue = true;
+	};
+
     template <class DataObjectT>
-    DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(WorkerQueue<DataObjectT> * q, W_TYPE t, W_FLOW f)
-    : data(q->_get_data(t, f)) {
-        _ref_obj_type = t;
-        _enqueue = false;
-        _enqueue_next = q;
-        if (data) _return_to = data->_return_to_pool;
-        else if (f == W_FLOW_BLOCKING && t == W_TYPE_UNUSED && q->_running ) {
-            throw OIError("OIBufferQueue has no free elements.");
-        }
+    DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(WorkerQueue<DataObjectT> * q, W_FLOW f)
+    : data(q->_get_data(f, -1)) {
+		_continue = true;
     };
     
     template <class DataObjectT>
     DataObjectAcquisition<DataObjectT>::~DataObjectAcquisition() {
         if (!data) return;
-        if (_enqueue && _enqueue_next != nullptr) {
-            _enqueue_next->_enqueue(std::move(data));
+        if (_continue && data->_workers.size() > 0) {
+			WorkerQueue<DataObjectT> * _next = (WorkerQueue<DataObjectT> *) data->_workers.front();
+			data->_workers.pop();
+			_next->_enqueue(std::move(data));
         } else {
-            data->reset();
-            _return_to->_return(std::move(data));
+			ObjectPool<DataObject> * _return_to = data->_return_to_pool;
+			_return_to->_return(std::move(data));
         }
     };
     
     template <class DataObjectT>
-    void DataObjectAcquisition<DataObjectT>::enqueue() {
-        _enqueue = true;
-    };
-    
-    template <class DataObjectT>
-    void DataObjectAcquisition<DataObjectT>::enqueue(WorkerQueue<DataObjectT> * q) {
-        _enqueue = true;
-        _enqueue_next = q;
+    void DataObjectAcquisition<DataObjectT>::next() {
+        _continue = true;
     };
     
     template <class DataObjectT>
     void DataObjectAcquisition<DataObjectT>::release() {
-        _enqueue = false;
-        _enqueue_next = nullptr;
+		_continue = false;
     };
+
+	template <class DataObjectT>
+	void DataObjectAcquisition<DataObjectT>::enqueue(WorkerQueue<DataObjectT> * q) {
+		_continue = true;
+		data->_workers.push((WorkerQueue<DataObject> *) q);
+	};
     
     template <class DataObjectT>
     DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(DataObjectAcquisition&& that) {
         data = std::move(that.data);
         _enqueue = that._enqueue;
-        _return_to = that._return_to;
-        _enqueue_next = that._enqueue_next;
-        that._enqueue = false;
-        that._return_to = nullptr;
-        that._enqueue_next = nullptr;
+		that._enqueue = false;
     };
     
     template <class DataObjectT>
     DataObjectAcquisition<DataObjectT>& DataObjectAcquisition<DataObjectT>::operator=(DataObjectAcquisition<DataObjectT>&& that) {
         data = std::move(that.data);
         _enqueue = that._enqueue;
-        _return_to = that._return_to;
-        _enqueue_next = that._next;
         that._enqueue = false;
-        that._return_to = nullptr;
-        that._next = nullptr;
         return *this;
     };
 } } }
