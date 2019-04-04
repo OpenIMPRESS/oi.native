@@ -16,8 +16,19 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <string> // required for std::string
+//#include <sys/types.h>
+//#include <sys/stat.h> // no clue why required -- man pages say so
+
 #include "OIIO.hpp"
 #include "OIWorker.hpp"
+
+#if defined(_WIN32)
+#include <direct.h>
+#define oi_currentdir _getcwd
+#else
+#define oi_currentdir getcwd
+#endif
 
 namespace oi { namespace core {
     
@@ -28,4 +39,5 @@ namespace oi { namespace core {
     
     void debugMemory(unsigned char * loc, size_t len);
     
+	int oi_mkdir(std::string path);
 } }

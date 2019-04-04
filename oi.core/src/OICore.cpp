@@ -51,5 +51,16 @@ namespace oi { namespace core {
         
         printf("+\n+++++++++++++++++++++++++++++++++++++++++++\n\n");
     }
+
+	int oi_mkdir(std::string sPath) {
+		int nError = 0;
+#if defined(_WIN32)
+		nError = _mkdir(sPath.c_str()); // can be used on Windows
+#else 
+		mode_t nMode = 0733; // UNIX style permissions
+		nError = mkdir(sPath.c_str(), nMode); // can be used on non-Windows
+#endif
+		return nError;
+	}
     
 } }

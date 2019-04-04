@@ -5,18 +5,6 @@
 #include "OICore.hpp"
 #include "OIIO.hpp"
 
-#include <stdio.h>
-#ifdef WINDOWS
-#include <direct.h>
-#define GetCurrentDir _getcwd
-#else
-#include <unistd.h>
-#define GetCurrentDir getcwd
-#endif
-
-
-
-
 using namespace oi::core;
 using namespace oi::core::worker;
 using namespace oi::core::io;
@@ -137,16 +125,16 @@ class OIIOTest {
     IOMeta * meta;
 public:
     OIIOTest(std::string path) {
-        std::vector<std::pair<uint8_t, uint8_t>> channels;
-        std::pair<uint8_t, uint8_t> channelA = std::make_pair(0x00, 0x00);
-        std::pair<uint8_t, uint8_t> channelB = std::make_pair(0x00, 0x01);
+        std::vector<MsgType> channels;
+		MsgType channelA = std::make_pair(0x00, 0x00);
+		MsgType channelB = std::make_pair(0x00, 0x01);
         channels.push_back(channelA);
         channels.push_back(channelB);
-        meta = new IOMeta(path, "test1", channels);
+        meta = new IOMeta(path, "iotest", channels);
         
         int entryLength = 10;
         for (int i = 0; i < 10; i++) {
-            sleep(10);
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
             meta->add_entry(0, NOW().count(), i * entryLength, entryLength);
         }
     }
@@ -155,12 +143,12 @@ public:
 
 int main(int argc, char* argv[]) {
     char cCurrentPath[FILENAME_MAX];
-    if (!GetCurrentDir(cCurrentPath, sizeof(cCurrentPath))) return errno;
+    if (!oi_currentdir(cCurrentPath, sizeof(cCurrentPath))) return errno;
     //cCurrentPath[sizeof(cCurrentPath) - 1] = '\0';
     std::string path(cCurrentPath);
-    printf("Running in %s", path.c_str());
-    
+	printf("Running in %s\n", path.c_str());
     //OICoreTest test("HI");
-    
-    OIIOTest(path);
+
+	std::string dataPath = path + "/data";
+    OIIOTest testIO(dataPath);
 }

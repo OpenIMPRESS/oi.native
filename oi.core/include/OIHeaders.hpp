@@ -17,6 +17,8 @@
 #pragma once
 
 namespace oi { namespace core {
+
+	typedef std::pair<uint8_t, uint8_t> MsgType;
     
     const int MAX_UDP_PACKET_SIZE = 65500;
     

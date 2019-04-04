@@ -21,90 +21,50 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <vector>
 #include <map>
 #include <chrono>
+#include "OIWorker.hpp"
 #include "OICore.hpp"
 #include "OIHeaders.hpp"
 
 namespace oi { namespace core { namespace io {
 
-
-
 	// TODO: move these to seperate class...
 	class IOMeta {
 	public: // TODO: mode
 		IOMeta(std::string filePath, std::string session_name); // read from file at startup into memory
-		IOMeta(std::string filePath, std::string session_name, std::vector<std::pair<uint8_t, uint8_t>> channels); // initialize meta with these channels (start new file)
+		IOMeta(std::string filePath, std::string session_name, std::vector<MsgType> channels); // initialize meta with these channels (start new file)
 		//void add_entry(OI_META_ENTRY entry); // append at runtime (to memory and disk)
-        void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length);
+
+		std::string getDataPath(MsgType msgType);
+		uint32_t getChannel(MsgType msgType);
 
 		uint64_t prev_entry_time(uint32_t channel, uint64_t time); // return the first smaller timestamp
 		uint64_t next_entry_time(uint32_t channel, uint64_t time); // return the first bigger timestamp
 		int32_t  entries_at_time(OI_META_ENTRY * out, uint32_t channel, uint64_t time); // write references to out for all frames with timestamp time (return number of entries);
+		void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length);
+		bool is_readonly();
 	private:
 		std::map<uint32_t, std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>> meta;
 		OI_META_FILE_HEADER meta_header;
 		std::ofstream * out_meta;
+		std::string dataPath;
 	};
 
-
-	// configure time offset (on replay?) 
+	template <class DataObjectT>
 	class IOChannel {
 	public:
-		//IOChannel(); // META
-		//uint64_t play(std::chrono::milliseconds t);
-		/*{
-			bool forwards = true;
-			bool skip = false;
-			if (lastTimeStamp > t) forwards = false;
-			if (abs(lastTimeStamp.count() - t.count()) > 200) skip = true; // UGLY: magic number....
-			lastTimeStamp = t; // TODO: set this timestamp to the last actually played time?
-			uint64_t next_frame_time;
-			if (forwards) next_frame_time = prev_entry_time(t); // up and until this frametime
-			else next_frame_time = next_entry_time(t);
-
-			if (next_frame_time == last_frame_time) {
-				return TODO:frame_delta; // already sent all frames at this time...
-			}
-
-			uint64_t current_frame_time; // where do we continue with sending?
-			if (forwards && !skip) {
-				current_frame_time = next_entry_time(last_frame_time); // continuing with the frame after the last one sent;
-			} else if (!forwards && !skip) {
-				current_frame_time = prev_entry_time(last_frame_time); // continuing with the frame after the last one sent;
-			} else {
-				current_frame_time = next_frame_time; // continue from an earlier frame (skipping back)
-			}
-
-			do {
-				META_ENTRY meta_entries[32];
-				int n_packets = meta->entries_at_time(&meta_entries, this->channel, current_frame_time);
-				for (int i = 0; i < n_packets; i++) {
-					uint64_t reader_pos = reader->tellg();
-					if (reader_pos < meta_entries[i].data_start) {
-						std::streamsize skip_bytes = meta_entries[i].data_start - reader_pos;
-						reader->seekg(skip_bytes, std::ios::cur);
-					} else if (reader_pos > meta_entries[i].data_start) {
-						reader->seekg(meta_entries[i].data_start, std::ios::beg);
-					}
-					reader->read(reinterpret_cast<char *>(&(dc_audio->dataBuffer[writeOffset])), meta_entries[i].data_length);
-				}
-				last_frame_time = current_frame_time;
-				// TODO: if current_frame_time is out of range
-				if (forwards) {
-					current_frame_time = next_entry_time(current_frame_time);
-				} else {
-					current_frame_time = prev_entry_time(current_frame_time);
-				}
-			} while (last_frame_time < next_frame_time);
-
-			return TODO:frame_delta;
-
-		}*/
-		//void write(oi::core::worker::DataObject * obj, size_t len); // todo
+		IOChannel(MsgType t, IOMeta * meta);
+		// TODO: set/change meta on the fly?
+		void setReader(uint64_t t);
+		uint64_t read(uint64_t t, bool skip, oi::core::worker::WorkerQueue<DataObjectT> * out_queue);
+		void write(uint64_t originalTimestamp, uint8_t * data, size_t len);
 	private:
-		std::pair<uint8_t, uint8_t> _msg_type;
+		MsgType type;
 		uint64_t last_frame_time;
-		std::ifstream reader;
-		std::ofstream writer;
+		uint64_t last_time;
+		std::ifstream * reader;
+		std::ofstream * writer;
+		int32_t channelIdx;
+		IOMeta * meta;
 	};
     
 } } }
