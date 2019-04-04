@@ -78,7 +78,9 @@ namespace oi { namespace core { namespace network {
         virtual int Send(std::string data, asio::ip::udp::endpoint endpoint);
         virtual int Send(uint8_t * data, size_t len, asio::ip::udp::endpoint endpoint);
         
-        worker::WorkerQueue<UDPMessageObject> * send_queue();
+		worker::ObjectPool<UDPMessageObject>* send_pool();
+
+		worker::WorkerQueue<UDPMessageObject> * send_queue();
         //worker::WorkerQueue<UDPMessageObject> * queue_send(uint16_t msgType);
         //worker::WorkerQueue<UDPMessageObject> * queue_receive(uint16_t msgType);
         

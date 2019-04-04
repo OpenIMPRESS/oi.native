@@ -60,11 +60,11 @@ public:
         
         ObjectPool<UDPMessageObject> bufferPool(64 , 1024);
         
-        WorkerQueue<UDPMessageObject> inA(&bufferPool);
-        WorkerQueue<UDPMessageObject> inB(&bufferPool);
+        WorkerQueue<UDPMessageObject> * inA = new WorkerQueue<UDPMessageObject>();
+        WorkerQueue<UDPMessageObject> * inB = new WorkerQueue<UDPMessageObject>();
         
-        udp.RegisterQueue(PKG_TYPE_A, &inA, Q_IO_IN);
-        udp.RegisterQueue(PKG_TYPE_B, &inB, Q_IO_IN);
+        udp.RegisterQueue(PKG_TYPE_A, inA, Q_IO_IN);
+        udp.RegisterQueue(PKG_TYPE_B, inB, Q_IO_IN);
         
         srand(time(0));
         
@@ -94,7 +94,7 @@ public:
             }
             
             { // Check if there is incomming data in A queue...
-                DataObjectAcquisition<UDPMessageObject> doa(&inA, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> doa(inA, W_FLOW_NONBLOCKING);
                 if (doa.data) {
                     TEST_PACKET_A * a_in = (TEST_PACKET_A *) &doa.data->buffer[0];
                     assert(a_in->packetType == PKG_TYPE_A);
@@ -105,7 +105,7 @@ public:
             }
             
             { // Check if there is incomming data in B queue...
-                DataObjectAcquisition<UDPMessageObject> doa(&inB, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> doa(inB, W_FLOW_NONBLOCKING);
                 if (doa.data) {
                     TEST_PACKET_B * b_in = (TEST_PACKET_B *) &doa.data->buffer[0];
                     assert(b_in->packetType == PKG_TYPE_B);
@@ -121,7 +121,7 @@ public:
             
             
             if (sent_a < runs) {
-                DataObjectAcquisition<UDPMessageObject> doa(&inA, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> doa(&bufferPool, W_FLOW_NONBLOCKING);
                 if (doa.data) {
                     packet_send_a.data = sent_a;
                     memcpy((uint8_t *) &(doa.data->buffer[0]), (uint8_t *) &packet_send_a, sizeof(TEST_PACKET_A));
@@ -132,7 +132,7 @@ public:
             }
             
             if (sent_b < runs) {
-                DataObjectAcquisition<UDPMessageObject> doa(&inB, W_TYPE_UNUSED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> doa(&bufferPool, W_FLOW_NONBLOCKING);
                 if (doa.data) {
                     packet_send_b.data = sent_b;
                     memcpy((uint8_t *) &(doa.data->buffer[0]), (uint8_t *) &packet_send_b, sizeof(TEST_PACKET_B));
@@ -147,8 +147,8 @@ public:
         printf("%d: B Received: %d Sent: %d\n", src, received_b, sent_b);
         
         udp.Close();
-        inA.close();
-        inB.close();
+        inA->close();
+        inB->close();
     }
     
     
@@ -162,8 +162,8 @@ public:
         srand(time(0));
         
         std::chrono::microseconds t0 = NOWu();
-        std::thread * tClient0 = new std::thread(&OINetworkTest::Client, this, 5000, 5001);
-        std::thread * tClient1 = new std::thread(&OINetworkTest::Client, this, 5001, 5000);
+        std::thread * tClient0 = new std::thread(&OINetworkTest::Client, this, 9000, 9001);
+        std::thread * tClient1 = new std::thread(&OINetworkTest::Client, this, 9001, 9000);
         
         // Keep this thread alive while the client threads send the messages back and forth
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
@@ -188,8 +188,8 @@ public:
         udpc.InitConnector(SocketID, GUID, role, true);
         
         ObjectPool<UDPMessageObject> bufferPool(64 , 1024);
-        WorkerQueue<UDPMessageObject> queue_in(&bufferPool);
-        udpc.RegisterQueue(OI_LEGACY_MSG_FAMILY_DATA, &queue_in, Q_IO_IN);
+        WorkerQueue<UDPMessageObject> * queue_in = new WorkerQueue<UDPMessageObject>();
+        udpc.RegisterQueue(OI_LEGACY_MSG_FAMILY_DATA, queue_in, Q_IO_IN);
         
         std::chrono::milliseconds t0 = NOW();
         std::chrono::milliseconds lastSent = t0;
@@ -197,7 +197,7 @@ public:
         
         while (running) {
             { // Check if there is incomming data in A queue...
-                DataObjectAcquisition<UDPMessageObject> data_in(&queue_in, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
+                DataObjectAcquisition<UDPMessageObject> data_in(queue_in, W_FLOW_NONBLOCKING);
                 if (data_in.data) {
                     OI_LEGACY_HEADER * header = (OI_LEGACY_HEADER *) &(data_in.data->buffer[0]);
                     uint8_t * data = (uint8_t*) &(data_in.data->buffer[sizeof(OI_LEGACY_HEADER)]);
@@ -215,7 +215,7 @@ public:
                     lastSent = NOW();
                     //udpc.se
                     std::chrono::milliseconds tDelta = lastSent-t0;
-                    DataObjectAcquisition<UDPMessageObject> data_out(&queue_in, W_TYPE_UNUSED, W_FLOW_BLOCKING);
+                    DataObjectAcquisition<UDPMessageObject> data_out(&bufferPool, W_FLOW_BLOCKING);
                     if (data_out.data) {
                         OI_LEGACY_HEADER * header = (OI_LEGACY_HEADER *) &(data_out.data->buffer[0]);
                         header->packageFamily = OI_LEGACY_MSG_FAMILY_DATA;
@@ -228,7 +228,6 @@ public:
                         int msg_bytes = sprintf((char*) data, "World Hello. T: %lld .", tDelta.count());
                         data_out.data->data_start = 0;
                         data_out.data->data_end = sizeof(OI_LEGACY_HEADER) + msg_bytes;
-                        //data_out.enqueue(_send_queue);
                         printf("[%s] OUT: %s\n", SocketID.c_str(), data);
                         data_out.data->all_endpoints = true;
                         data_out.data->default_endpoint = false;
@@ -245,10 +244,11 @@ public:
         
         std::chrono::microseconds t0 = NOWu();
         
-        std::string GUID = "54056271f3c249c88b27ad7f3045aab8";
+        std::string GUID1 = "54056271f3c249c88b27ad7f3045aab8";
+		std::string GUID2 = "64056271f3c249c88b27ad7f3045aab8";
         
-        std::thread * tClient0 = new std::thread(&OINetworkConnectorTest::Client, this, GUID, "test2", OI_CLIENT_ROLE_CONSUME);
-        std::thread * tClient1 = new std::thread(&OINetworkConnectorTest::Client, this, GUID, "test1", OI_CLIENT_ROLE_PRODUCE);
+        std::thread * tClient0 = new std::thread(&OINetworkConnectorTest::Client, this, GUID1, "test1", OI_CLIENT_ROLE_CONSUME);
+        std::thread * tClient1 = new std::thread(&OINetworkConnectorTest::Client, this, GUID2, "test1", OI_CLIENT_ROLE_PRODUCE);
         
         // Keep this thread alive while the client threads send the messages back and forth
         std::this_thread::sleep_for(std::chrono::seconds(30));
@@ -272,6 +272,7 @@ int main(int argc, char* argv[]) {
     
     
     printf("Start\n");
-    OINetworkConnectorTest test("1");
+	OINetworkConnectorTest test("1");
+    //OINetworkTest test("1");
     printf("Done\n");
 }

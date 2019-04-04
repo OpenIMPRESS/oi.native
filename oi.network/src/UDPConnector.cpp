@@ -51,13 +51,13 @@ namespace oi { namespace core { namespace network {
         _mm_buffer_pool = obj_pool;
         
         //if (useMM) {
-            _mm_receive_queue = new worker::WorkerQueue<UDPMessageObject>(_mm_buffer_pool);
+            _mm_receive_queue = new worker::WorkerQueue<UDPMessageObject>();
             localIP = get_local_ip();
             UDPBase::InitReceiver(_mm_buffer_pool);
             
             // Manually initialize sender with UDPConnector implementation
             _send_pool = _mm_buffer_pool;
-            _queue_send = new worker::WorkerQueue<UDPMessageObject>(_send_pool);
+            _queue_send = new worker::WorkerQueue<UDPMessageObject>();
             _send_thread = new std::thread(&UDPConnector::DataSender, this);
             _sender_initialized = true;
             
@@ -98,6 +98,8 @@ namespace oi { namespace core { namespace network {
         std::pair<std::string, uint16_t> epkey = std::make_pair(ep.address().to_string(), (uint16_t) ep.port());
         if (endpoints.count(epkey) < 1) {
             endpoints[epkey] = new UDPEndpoint(ep);
+			printf("Endpoint: %s:%d\n",
+				ep.address().to_string().c_str(), ep.port());
             res = 1;
         } else {
             endpoints[epkey]->endpoint = ep;
@@ -139,7 +141,7 @@ namespace oi { namespace core { namespace network {
             }
             
             { // Handle incomming messages
-                worker::DataObjectAcquisition<UDPMessageObject> mmdata(_mm_receive_queue, oi::core::worker::W_TYPE_QUEUED, oi::core::worker::W_FLOW_NONBLOCKING);
+                worker::DataObjectAcquisition<UDPMessageObject> mmdata(_mm_receive_queue, oi::core::worker::W_FLOW_NONBLOCKING);
                 if (!mmdata.data) continue;
                 uint8_t magicByte = mmdata.data->buffer[0];
                 if (magicByte == OI_LEGACY_MSG_FAMILY_MM) {
@@ -148,12 +150,7 @@ namespace oi { namespace core { namespace network {
                         string host = j.at("address").get<string>();
                         string port = to_string(j.at("port").get<int>());
                         asio::ip::udp::endpoint ep = UDPBase::GetEndpoint(host, port);
-                        printf("Start talking to: %s:%s\n",
-                               host.c_str(), port.c_str());
-                        printf("Endpoint: %s:%d\n",
-                               ep.address().to_string().c_str(), ep.port());
-                        
-                        
+						AddEndpoint(ep);
                     } else if (j["type"] == "punch") {
                         // Heartbeat/punch...
                         
@@ -258,7 +255,7 @@ namespace oi { namespace core { namespace network {
     }
     
     int UDPConnector::OISendString(uint8_t msg_family, uint8_t msg_type, std::string msg, OI_MESSAGE_FORMAT oimf, asio::ip::udp::endpoint ep) {
-        worker::DataObjectAcquisition<UDPMessageObject> data_send(send_queue(), oi::core::worker::W_TYPE_UNUSED, oi::core::worker::W_FLOW_BLOCKING);
+        worker::DataObjectAcquisition<UDPMessageObject> data_send(send_pool(), oi::core::worker::W_FLOW_BLOCKING);
         if (!data_send.data) return -1;
         OIHeaderHelper oih = oi::core::OIHeaderHelper::OIHeaderHelper::InitMsgHeader(&(data_send.data->buffer[0]), false);
         oih.oi_msg_header->msg_family = msg_family;
@@ -287,7 +284,7 @@ namespace oi { namespace core { namespace network {
     
     int UDPConnector::MMSend(std::string json_str, asio::ip::udp::endpoint ep) {
         //if (!_useMM) { printf("ERROR sending MM message: not using matchmaking.\n"); return -1; }
-        worker::DataObjectAcquisition<UDPMessageObject> data_send(send_queue(), oi::core::worker::W_TYPE_UNUSED, oi::core::worker::W_FLOW_BLOCKING);
+        worker::DataObjectAcquisition<UDPMessageObject> data_send(send_pool(), oi::core::worker::W_FLOW_BLOCKING);
         if (!data_send.data)  { printf("ERROR sending MM message: no free buffer.\n"); return -1; }
         data_send.data->buffer[0] = OI_LEGACY_MSG_FAMILY_MM;
         memcpy(&(data_send.data->buffer[1]), json_str.c_str(), json_str.length());
@@ -331,7 +328,7 @@ namespace oi { namespace core { namespace network {
     int UDPConnector::DataSender() {
         _running = true;
         while (_running) {
-            worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_TYPE_QUEUED, worker::W_FLOW_BLOCKING);
+            worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_FLOW_BLOCKING);
             if (!_running || !doa_s.data) continue;
             
             asio::error_code ec;

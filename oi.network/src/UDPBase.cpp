@@ -77,7 +77,7 @@ namespace oi { namespace core { namespace network {
         if (_sender_initialized) return -1;
         
         _send_pool = send_pool;
-        _queue_send = new worker::WorkerQueue<UDPMessageObject>(_send_pool);
+        _queue_send = new worker::WorkerQueue<UDPMessageObject>();
         _send_thread = new std::thread(&UDPBase::DataSender, this);
         _sender_initialized = true; // Todo wait/check if sender really starts in thread?
         return 1;
@@ -87,7 +87,7 @@ namespace oi { namespace core { namespace network {
         if (_receiver_initialized) return -1;
         
         _receive_pool = recv_pool;
-        _queue_receive = new worker::WorkerQueue<UDPMessageObject>(recv_pool);
+        _queue_receive = new worker::WorkerQueue<UDPMessageObject>();
         _listen_thread = new std::thread(&UDPBase::DataListener, this);
         _receiver_initialized = true; // Todo wait/check if receiver really starts in thread?
         return 1;
@@ -120,7 +120,10 @@ namespace oi { namespace core { namespace network {
         return _queue_map[key];
     }
      */
-    
+
+	worker::ObjectPool<UDPMessageObject> * UDPBase::send_pool() {
+		return _send_pool;
+	}
     
     worker::WorkerQueue<UDPMessageObject> * UDPBase::send_queue() {
         return _queue_send;
@@ -150,17 +153,18 @@ namespace oi { namespace core { namespace network {
         //worker::WorkerQueue<UDPMessageObject> * q = queue_send(data_type);
         //if (q == NULL) return -1;
         
-        worker::WorkerQueue<UDPMessageObject> * q = _queue_send;
+		worker::ObjectPool<UDPMessageObject> * p = _send_pool;
         
         // If we have specified a buffer for outgoing messages...
+		/*
         if (_queue_map.size() > 0 && length >= 2) {
             uint16_t peek_type;
             memcpy(&peek_type, data, sizeof(peek_type));
             std::pair<uint16_t, worker::Q_IO> key = std::make_pair(peek_type, worker::Q_IO_OUT);
-            if (_queue_map.count(key) == 1) q = _queue_map[key];
-        }
+            if (_queue_map.count(key) == 1) p = _queue_map[key];
+        }*/
         
-        worker::DataObjectAcquisition<UDPMessageObject> doa_s(q , worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
+        worker::DataObjectAcquisition<UDPMessageObject> doa_s(_send_pool, worker::W_FLOW_BLOCKING);
         if (!doa_s.data) return -1;
         
         memcpy((uint8_t *) &(doa_s.data->buffer[0]), data, length);
@@ -188,7 +192,7 @@ namespace oi { namespace core { namespace network {
         _running = true;
         while (_running) {
             // Send data from our queue
-            worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_TYPE_QUEUED, worker::W_FLOW_BLOCKING);
+            worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_send, worker::W_FLOW_BLOCKING);
             if (!_running || !doa_s.data) continue;
             
             asio::error_code ec;
@@ -221,7 +225,8 @@ namespace oi { namespace core { namespace network {
             
             try {
                 // Read data into default receive queue
-                worker::WorkerQueue<UDPMessageObject> * q = _queue_receive;
+                //worker::WorkerQueue<UDPMessageObject> * q = _queue_receive;
+
                 /*
                 // Unless we have queues specified for use OI data_type headers
                 if (_queue_map.size() > 0) {
@@ -249,9 +254,10 @@ namespace oi { namespace core { namespace network {
 				*/
                 
                 // will throw exception on timeout
-                worker::DataObjectAcquisition<UDPMessageObject> doa_r(q, worker::W_TYPE_UNUSED, worker::W_FLOW_BLOCKING);
+                worker::DataObjectAcquisition<UDPMessageObject> doa_r(_receive_pool, worker::W_FLOW_BLOCKING);
+				doa_r.release(); // by default, release data back to pool...
 
-				worker::WorkerQueue<UDPMessageObject> * return_queue = q;
+				worker::WorkerQueue<UDPMessageObject> * return_queue = _queue_receive;
                 if (!_running) break;
                 
                 size_t len = _socket.receive_from(asio::buffer(doa_r.data->buffer, doa_r.data->buffer_size), recv_endpoint, mf, ec);
