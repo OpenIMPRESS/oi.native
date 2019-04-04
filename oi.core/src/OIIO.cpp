@@ -143,7 +143,7 @@ namespace oi { namespace core { namespace io {
 	void IOChannel<DataObjectT>::write(uint64_t originalTimestamp, uint8_t * data, size_t len)	{
 		if (this->writer == nullptr) throw "cannot write. its a readonly channel";
 		std::streampos data_start = this->writer->tellp();
-		rgbd_writer->write((const char*)data, len);
+		this->writer->write((const char*)data, len);
 		std::streampos data_end = this->writer->tellp();
 		if (data_end - data_start != len) throw "wrote more/less than planned.";
 		this->meta->add_entry(this->channelIdx, originalTimestamp, data_start, len);
@@ -160,12 +160,12 @@ namespace oi { namespace core { namespace io {
 		if (last_time > t) forwards = false;
 		last_time = t; // TODO: set this timestamp to the last actually played time?
 		uint64_t next_frame_time;
-		if (forwards) next_frame_time = meta->prev_entry_time(t); // up and until this frametime
-		else next_frame_time = next_entry_time(t);
+		if (forwards) next_frame_time = meta->prev_entry_time(this->channelIdx, t); // up and until this frametime
+		else next_frame_time = meta->next_entry_time(this->channelIdx, t);
 
 		if (next_frame_time == last_frame_time) {
-			if (forwards) return meta->next_entry_time(t) - t;
-			else return t - meta->prev_entry_time(t);
+			if (forwards) return meta->next_entry_time(next_frame_time, t) - t;
+			else return t - meta->prev_entry_time(next_frame_time, t);
 		}
 
 		uint64_t current_frame_time; // where do we continue with sending?
@@ -180,8 +180,8 @@ namespace oi { namespace core { namespace io {
 		}
 
 		do {
-			META_ENTRY meta_entries[32];
-			int n_packets = meta->entries_at_time(&meta_entries, this->channel, current_frame_time);
+			OI_META_ENTRY meta_entries[32];
+			int n_packets = meta->entries_at_time(&meta_entries, this->channelIdx, current_frame_time);
 			for (int i = 0; i < n_packets; i++) {
 				uint64_t reader_pos = reader->tellg();
 				if (reader_pos < meta_entries[i].data_start) {
@@ -191,21 +191,22 @@ namespace oi { namespace core { namespace io {
 				else if (reader_pos > meta_entries[i].data_start) {
 					reader->seekg(meta_entries[i].data_start, std::ios::beg);
 				}
-				reader->read(reinterpret_cast<char *>(&(dc_audio->dataBuffer[writeOffset])), meta_entries[i].data_length);
+                // read into doa?
+				//reader->read(reinterpret_cast<char *>(&(dc_audio->dataBuffer[writeOffset])), meta_entries[i].data_length);
 			}
 			last_frame_time = current_frame_time;
 			// TODO: if current_frame_time is out of range
 			if (forwards) {
-				current_frame_time = next_entry_time(current_frame_time);
+				current_frame_time = meta->next_entry_time(this->channelIdx, current_frame_time);
 			}
 			else {
-				current_frame_time = prev_entry_time(current_frame_time);
+				current_frame_time = meta->prev_entry_time(this->channelIdx, current_frame_time);
 			}
 		} while (last_frame_time < next_frame_time);
 
 		// todo: what if at end?
-		if (forwards) return meta->next_entry_time(t) - t;
-		else return t - meta->prev_entry_time(t);
+		if (forwards) return meta->next_entry_time(this->channelIdx, t) - t;
+		else return t - meta->prev_entry_time(this->channelIdx, t);
 	}
 
 

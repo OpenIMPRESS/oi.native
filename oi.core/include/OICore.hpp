@@ -20,6 +20,9 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 //#include <sys/types.h>
 //#include <sys/stat.h> // no clue why required -- man pages say so
 
+
+#include <stdio.h>  /* defines FILENAME_MAX */
+
 #include "OIIO.hpp"
 #include "OIWorker.hpp"
 
@@ -27,6 +30,8 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <direct.h>
 #define oi_currentdir _getcwd
 #else
+#include <sys/stat.h>
+#include <unistd.h>
 #define oi_currentdir getcwd
 #endif
 
