@@ -19,7 +19,7 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <cstdlib>
 #include <signal.h>
 
-#include <RGBDStreamer.hpp>
+#include <RGBDDevice.hpp>
 #include <LibFreenect2DeviceInterface.hpp>
 
 using namespace oi::core::rgbd;
@@ -30,7 +30,8 @@ asio::io_service io_service;
 int main(int argc, char *argv[]) {
     RGBDStreamerConfig config(argc, argv);
     LibFreenect2DeviceInterface device(config.deviceSerial, config.pipeline, 0.1f, config.maxDepth);
-    RGBDStreamer streamer(device, config, io_service);
+	RGBDStreamIO streamIO(config, io_service);
+    RGBDDevice streamer(device, streamIO);
     
     while (true) {
         device.Cycle(&streamer);

@@ -49,7 +49,7 @@ LibFreenect2DeviceInterface::LibFreenect2DeviceInterface(std::string serial, std
     OpenDevice();
 }
 
-int LibFreenect2DeviceInterface::Cycle(oi::core::rgbd::RGBDStreamer * streamer) {
+int LibFreenect2DeviceInterface::Cycle(oi::core::rgbd::RGBDDevice * streamer) {
     if (!listener->waitForNewFrame(*frames, 5 * 1000)) {
         std::cerr << "\nERROR: Libfreenect2 did not provide a new frame." << std::endl;
         return -1;

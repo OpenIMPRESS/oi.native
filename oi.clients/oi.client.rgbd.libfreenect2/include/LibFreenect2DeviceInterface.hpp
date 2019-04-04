@@ -16,7 +16,7 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 */
 #pragma once
 
-#include <RGBDStreamer.hpp>
+#include <RGBDDevice.hpp>
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/frame_listener_impl.h>
 #include <libfreenect2/registration.h>
@@ -30,7 +30,7 @@ public:
     LibFreenect2DeviceInterface(std::string serial, std::string pipeline_name, float minDepth, float maxDepth);
     int OpenDevice();
     int CloseDevice();
-    int Cycle(oi::core::rgbd::RGBDStreamer * streamer);
+    int Cycle(oi::core::rgbd::RGBDDevice * streamer);
     
     int frame_width();
     int frame_height();
