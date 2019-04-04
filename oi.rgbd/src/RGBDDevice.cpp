@@ -20,104 +20,15 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <sstream>
 #include <algorithm>
 #include <iterator>
-#include "RGBDStreamer.hpp"
+#include "RGBDDevice.hpp"
 
 using namespace oi::core::rgbd;
 using namespace oi::core::worker;
 using namespace oi::core::network;
 
-void split(const std::string& s, char c, std::vector<std::string>& v) {
-    std::string::size_type i = 0;
-    std::string::size_type j = s.find(c);
-    if (j >= s.length()) {
-        v.push_back(s);
-    }
-    
-    while (j != std::string::npos) {
-        v.push_back(s.substr(i, j-i));
-        i = ++j;
-        j = s.find(c, j);
-        
-        if (j == std::string::npos)
-            v.push_back(s.substr(i, s.length()));
-    }
-}
-
-RGBDStreamerConfig::RGBDStreamerConfig() {}
-
-RGBDStreamerConfig::RGBDStreamerConfig(int argc, char *argv[]) {
-    this->Parse(argc, argv);
-}
-
-void RGBDStreamerConfig::Parse(int argc, char *argv[]) {
-    
-    std::string useMMParam("-mm");
-    std::string socketIDParam("-id");
-    std::string listenPortParam("-lp");
-    std::string mmPortParam("-mmp");
-    std::string mmHostParam("-mmh");
-    std::string endpointsParam("-ep");
-    std::string serialParam("-sn");
-    std::string pipelineParam("-pp");
-    std::string maxDepthParam("-md");
-    
-    
-    // TODO: add endpoint list parsing!
-    for (int count = 1; count < argc; count += 2) {
-        if (socketIDParam.compare(argv[count]) == 0) {
-            this->socketID = argv[count + 1];
-        } else if (mmHostParam.compare(argv[count]) == 0) {
-            this->mmHost = argv[count + 1];
-        } else if (mmPortParam.compare(argv[count]) == 0) {
-            this->mmPort = std::stoi(argv[count + 1]);
-        } else if (listenPortParam.compare(argv[count]) == 0) {
-            this->listenPort = std::stoi(argv[count + 1]);
-        } else if (serialParam.compare(argv[count]) == 0) {
-            this->deviceSerial = argv[count + 1];
-        } else if (pipelineParam.compare(argv[count]) == 0) {
-            this->pipeline = argv[count + 1];
-        } else if (maxDepthParam.compare(argv[count]) == 0) {
-            this->maxDepth = std::stof(argv[count + 1]);
-        } else if (useMMParam.compare(argv[count]) == 0) {
-            this->useMatchMaking = std::stoi(argv[count + 1])==1;
-        } else if (endpointsParam.compare(argv[count]) == 0) {
-            std::string arg = argv[count + 1];
-            std::vector<std::string> eps;
-            split(arg, ',', eps);
-            
-            for (int i = 0; i < eps.size(); ++i) {
-                std::vector<std::string> elems;
-                split(eps[i], ':', elems);
-                if (elems.size() == 2) {
-                    this->default_endpoints.push_back(std::make_pair(elems[0], elems[1]));
-                    printf("ENDPOINT: %s:%s\n", elems[0].c_str(), elems[1].c_str());
-                }
-            }
-        } else {
-            std::cout << "Unknown Parameter: " << argv[count] << std::endl;
-        }
-    }
-    
-}
-
-
-
-RGBDStreamer::RGBDStreamer(RGBDDeviceInterface& device, RGBDStreamerConfig streamer_cfg, asio::io_service& io_service) {
+RGBDDevice::RGBDDevice(RGBDDeviceInterface& device, RGBDStreamIO& io) {
     this->_device = &device;
-    this->_rgbdstreamer_config = streamer_cfg;
-    
-    
-    this->_udpc = new UDPConnector(streamer_cfg.mmHost, streamer_cfg.mmPort, streamer_cfg.listenPort, io_service);
-    // TODO device serial not always set...
-    this->_udpc->InitConnector(streamer_cfg.socketID, streamer_cfg.deviceSerial, OI_CLIENT_ROLE_PRODUCE,
-                               streamer_cfg.useMatchMaking, new ObjectPool<UDPMessageObject>(128, MAX_UDP_PACKET_SIZE));
-    
-    for (int i = 0; i < streamer_cfg.default_endpoints.size(); ++i) {
-        std::pair<std::string, std::string> ep = streamer_cfg.default_endpoints[i];
-        this->_udpc->AddEndpoint(ep.first, ep.second);
-        printf("RGBD Streamer target: %s:%s\n", ep.first.c_str(), ep.second.c_str());
-    }
-    
+	this->_io = &io;
     
     _stream_config.header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
     _stream_config.header.packageType = OI_MSG_TYPE_RGBD_CONFIG;
@@ -158,28 +69,28 @@ RGBDStreamer::RGBDStreamer(RGBDDeviceInterface& device, RGBDStreamerConfig strea
     std::string guid = device.device_guid();
     memcpy(&(_stream_config.guid[0]), guid.c_str(), guid.length()+1);
     
-    handleStreamThread = new std::thread(&RGBDStreamer::HandleStream, this);
+    handleStreamThread = new std::thread(&RGBDDevice::HandleStream, this);
 }
 
-int RGBDStreamer::HandleStream() {
+int RGBDDevice::HandleStream() {
     //worker::ObjectPool<UDPMessageObject> bufferPool(32 , 4096);
     //worker::WorkerQueue<UDPMessageObject> cmdqueue(&bufferPool);
     //_udpc->RegisterQueue(OI_LEGACY_MSG_FAMILY_RGBD_CMD, &cmdqueue, Q_IO_IN);
     while (true) {
+		fps_counter = 0;
         std::this_thread::sleep_for(_config_send_interval);
         printf("SENT CONFIG: %d bytes. FPS: %d\n", SendConfig(), fps_counter/(int)(_config_send_interval.count() / 1000));
-        fps_counter = 0;
         //DataObjectAcquisition<UDPMessageObject> data_in(&cmdqueue, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
         //data_in.release();
     }
     return 1;
 }
 
-int RGBDStreamer::SendConfig() {
-    _stream_config.header.sequence = _udpc->next_sequence_id();
+int RGBDDevice::SendConfig() {
+    _stream_config.header.sequence = _io->next_sequence_id();
     _stream_config.header.timestamp = NOW().count();
     
-    DataObjectAcquisition<UDPMessageObject> data_out(_udpc->send_queue(), W_TYPE_UNUSED, W_FLOW_BLOCKING);
+    DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
     if (!data_out.data) {
         std::cout << "\nERROR: No free buffers available" << std::endl;
         return -1;
@@ -188,16 +99,14 @@ int RGBDStreamer::SendConfig() {
     int data_len = sizeof(CONFIG_STRUCT);
     memcpy(&(data_out.data->buffer[0]), (unsigned char *) &_stream_config, data_len);
     data_out.data->data_end = data_len;
-    data_out.data->default_endpoint = false;
-    data_out.data->all_endpoints = true;
-    data_out.enqueue(_udpc->send_queue());
+    data_out.enqueue(_io->live_frame_queue());
     return data_len;
 }
 
-int RGBDStreamer::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp) {
+int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp) {
     _audio_samples_counter += n_samples;
     
-    DataObjectAcquisition<UDPMessageObject> data_out(_udpc->send_queue(), W_TYPE_UNUSED, W_FLOW_BLOCKING);
+    DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
     if (!data_out.data) {
         std::cout << "\nERROR: No free buffers available" << std::endl;
         return -1;
@@ -211,7 +120,7 @@ int RGBDStreamer::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_s
     audio_header->header.packageType = OI_MSG_TYPE_AUDIO_DEFAULT_FRAME;
     audio_header->header.partsTotal = 1;
     audio_header->header.currentPart = 1;
-    audio_header->header.sequence = _udpc->next_sequence_id();
+    audio_header->header.sequence = _io->next_sequence_id();
     audio_header->header.timestamp = timestamp.count();
     
     audio_header->channels = channels;
@@ -235,25 +144,47 @@ int RGBDStreamer::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_s
     
     size_t data_len = header_size + writeOffset;
     data_out.data->data_end = data_len;
-    data_out.data->default_endpoint = false;
-    data_out.data->all_endpoints = true;
-    data_out.enqueue(_udpc->send_queue());
+    data_out.enqueue(_io->live_frame_queue());
     return data_len;
 }
 
-int RGBDStreamer::QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp) {
-	return -1;
+int RGBDDevice::QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp) {
+	int res = 0;
+	DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
+	if (!data_out.data) {
+		std::cout << "\nERROR: No free buffers available" << std::endl;
+		return -1;
+	}
+	data_out.data->data_start = 0;
+	BODY_HEADER_STRUCT * body_header = (BODY_HEADER_STRUCT *) &(data_out.data->buffer[0]);
+	static size_t header_size = sizeof(BODY_HEADER_STRUCT);
+	body_header->header.timestamp = timestamp.count();
+	body_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_MOCAP;
+	body_header->header.packageType = OI_MSG_TYPE_MOCAP_BODY_FRAME_KINECTV2;
+	body_header->header.partsTotal = 1;
+	body_header->header.currentPart = 1;
+	body_header->header.sequence = _io->next_sequence_id();
+	body_header->n_bodies = n_bodies;
+	uint8_t * data = &(data_out.data->buffer[header_size]);
+	size_t data_size = sizeof(BODY_STRUCT) * n_bodies;
+	memcpy(data, bodies, data_size);
+
+	int d_data_len = header_size + data_size;
+	data_out.data->data_end = d_data_len;
+	res += d_data_len;
+	data_out.enqueue(_io->live_frame_queue());
+	return res;
 }
 
-int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depthdata, std::chrono::milliseconds timestamp) {
+int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depthdata, std::chrono::milliseconds timestamp) {
     return QueueRGBDFrame(sequence, rgbdata, depthdata, NULL, timestamp);
 }
 
-int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint16_t * depthdata, std::chrono::milliseconds timestamp) {
+int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint16_t * depthdata, std::chrono::milliseconds timestamp) {
     return QueueRGBDFrame(sequence, rgbdata, NULL, depthdata, timestamp);
 }
 
-int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depth_any, uint16_t * depth_ushort, std::chrono::milliseconds timestamp) {
+int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depth_any, uint16_t * depth_ushort, std::chrono::milliseconds timestamp) {
     int res = 0;
     std::chrono::milliseconds delta = timestamp - _prev_frame;
     _prev_frame = timestamp;
@@ -266,7 +197,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
     int frame_height =_device->frame_height();
     
     { // Scope buffer access
-        DataObjectAcquisition<UDPMessageObject> data_out(_udpc->send_queue(), W_TYPE_UNUSED, W_FLOW_BLOCKING);
+        DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
         if (!data_out.data) {
             std::cout << "\nERROR: No free buffers available" << std::endl;
             return -1;
@@ -283,7 +214,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
         rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_COLOR;
         rgbd_header->header.partsTotal = 1;
         rgbd_header->header.currentPart = 1;
-        rgbd_header->header.sequence = _udpc->next_sequence_id();
+        rgbd_header->header.sequence = _io->next_sequence_id();
         rgbd_header->header.timestamp = timestamp.count();
         rgbd_header->startRow = (uint16_t) 0;             // ... we can fit the whole...
         rgbd_header->endRow = (uint16_t) frame_height; //...RGB data in one packet
@@ -301,9 +232,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
         int c_data_len = header_size + _jpegSize;
         data_out.data->data_end = c_data_len;
         res += c_data_len;
-        data_out.data->default_endpoint = false;
-        data_out.data->all_endpoints = true;
-        data_out.enqueue(_udpc->send_queue());
+        data_out.enqueue(_io->live_frame_queue());
         tjDestroy(_jpegCompressor);
     }
     
@@ -313,7 +242,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
         uint16_t endRow = startRow + linesPerMessage;
         if (startRow >= endRow) break;
         if (endRow >= frame_height) endRow = frame_height;
-        DataObjectAcquisition<UDPMessageObject> data_out(_udpc->send_queue(), W_TYPE_UNUSED, W_FLOW_BLOCKING);
+        DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
         if (!data_out.data) {
             std::cout << "\nERROR: No free buffers available" << std::endl;
             return -1;
@@ -327,7 +256,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
         rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_DEPTH_BLOCK;
         rgbd_header->header.partsTotal = 1;
         rgbd_header->header.currentPart = 1;
-        rgbd_header->header.sequence = _udpc->next_sequence_id();
+        rgbd_header->header.sequence = _io->next_sequence_id();
         rgbd_header->header.timestamp = timestamp.count();
         rgbd_header->startRow = startRow;             // ... we can fit the whole...
         rgbd_header->endRow = endRow; //...RGB data in one packet
@@ -359,10 +288,7 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
         int d_data_len = writeOffset;
         data_out.data->data_end = d_data_len;
         res += d_data_len;
-        data_out.data->default_endpoint = false;
-        data_out.data->all_endpoints = true;
-        data_out.enqueue(_udpc->send_queue());
-        
+        data_out.enqueue(_io->live_frame_queue());
     }
     
     fps_counter++;
@@ -372,11 +298,50 @@ int RGBDStreamer::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t *
 
 
 
-int RGBDStreamer::QueueHDFrame(unsigned char * rgbdata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
+int RGBDDevice::QueueHDFrame(unsigned char * rgbdata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
     return -1;
 }
 
-int RGBDStreamer::QueueBodyIndexFrame(unsigned char * bidata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
-    return -1;
+int RGBDDevice::QueueBodyIndexFrame(unsigned char * bidata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
+	std::chrono::milliseconds delta = timestamp - _prev_body_frame;
+	_prev_body_frame = timestamp;
+	unsigned short deltaValue = (unsigned short)delta.count();
+	int res = 0;
+
+	DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
+	if (!data_out.data) {
+		std::cout << "\nERROR: No free buffers available" << std::endl;
+		return -1;
+	}
+	data_out.data->data_start = 0;
+	RGBD_HEADER_STRUCT * rgbd_header = (RGBD_HEADER_STRUCT *) &(data_out.data->buffer[0]);
+	static size_t header_size = sizeof(RGBD_HEADER_STRUCT);
+
+	rgbd_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
+	rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK; // _BLOCK?, even though its a whole one?
+	rgbd_header->header.partsTotal = 1;
+	rgbd_header->header.currentPart = 1;
+	rgbd_header->header.sequence = _io->next_sequence_id();
+	rgbd_header->header.timestamp = timestamp.count();
+	rgbd_header->delta_t = deltaValue;
+	rgbd_header->startRow = 0;
+	rgbd_header->endRow = _device->frame_height();
+	uint8_t * data = &(data_out.data->buffer[header_size]);
+
+	// COMPRESS COLOR
+	long unsigned int _jpegSize = MAX_UDP_PACKET_SIZE - header_size;
+	unsigned char* _compressedImage = (unsigned char*)data;
+
+	tjhandle _jpegCompressor = tjInitCompress();
+	tjCompress2(_jpegCompressor, bidata, width, 0, height, pix_fmt,
+		&_compressedImage, &_jpegSize, TJSAMP_GRAY, 75,
+		TJFLAG_FASTDCT);
+	int c_data_len = header_size + _jpegSize;
+	data_out.data->data_end = c_data_len;
+	res += c_data_len;
+	data_out.enqueue(_io->live_frame_queue());
+	tjDestroy(_jpegCompressor);
+
+	return res;
 }
 

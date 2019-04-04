@@ -19,17 +19,18 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include "OICore.hpp"
 #include "UDPConnector.hpp"
 #include "OIHeaders.hpp"
+#include "RGBDStreamIO.hpp"
 #include <turbojpeg.h>
 
 namespace oi { namespace core { namespace rgbd {
-    class RGBDStreamer;
+    class RGBDDevice;
     
     class RGBDDeviceInterface {
     public:
         //virtual int HandleData(oi::core::network::DataContainer * dc) = 0;
         
         //virtual int HandleData(oi::core::... * dc) = 0;
-        virtual int Cycle(RGBDStreamer * streamer) = 0;
+        virtual int Cycle(RGBDDevice * streamer) = 0;
         virtual int OpenDevice() = 0; // ...
         virtual int CloseDevice() = 0;
         
@@ -51,26 +52,10 @@ namespace oi { namespace core { namespace rgbd {
         virtual bool supports_hd() = 0;
     };
     
-    class RGBDStreamerConfig {
+    class RGBDDevice {
     public:
-        RGBDStreamerConfig(int argc, char *argv[]);
-        RGBDStreamerConfig();
-        void Parse(int argc, char *argv[]);
-        bool useMatchMaking = false;
-        std::string socketID = "kinect1";
-        std::string mmHost = "";
-        int mmPort = 6312;
-        int listenPort = 5066;
-        std::vector<std::pair<std::string, std::string>> default_endpoints;
-        std::string deviceSerial = ""; //
-        std::string pipeline = "opengl";
-        float maxDepth = 8.0f;
-    };
-
-    class RGBDStreamer {
-    public:
-        RGBDStreamer(RGBDDeviceInterface& device, RGBDStreamerConfig streamer_cfg, asio::io_service& io_service);
-        int UpdateStreamConfig(CONFIG_STRUCT cfg);
+        RGBDDevice(RGBDDeviceInterface& device, RGBDStreamIO& io);
+        //int UpdateStreamConfig(CONFIG_STRUCT cfg);
         
         int QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp);
         int QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies, std::chrono::milliseconds timestamp);
@@ -83,7 +68,6 @@ namespace oi { namespace core { namespace rgbd {
 
         int SendConfig();
         
-        RGBDStreamerConfig _rgbdstreamer_config;
         const int JPEG_QUALITY = 40;
         const int MAX_LINES_PER_MESSAGE = 5;
         
@@ -91,11 +75,12 @@ namespace oi { namespace core { namespace rgbd {
     private:
         int HandleStream();
         std::thread * handleStreamThread;
+		
+		RGBDStreamIO * _io;
         
-        oi::core::network::UDPConnector * _udpc;
-        oi::core::worker::ObjectPool<oi::core::network::UDPMessageObject> * _bufferPool;
         RGBDDeviceInterface * _device;
         std::chrono::milliseconds _prev_frame;
+		std::chrono::milliseconds _prev_body_frame;
         uint32_t fps_counter;
         CONFIG_STRUCT _stream_config;
         

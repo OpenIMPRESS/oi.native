@@ -20,7 +20,7 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include <cassert>
 #include "OICore.hpp"
 #include "RGBDStreamIO.hpp"
-#include "RGBDStreamer.hpp"
+#include "RGBDDevice.hpp"
 
 int main(int argc, char* argv[]) {
     printf("TODO\n");
