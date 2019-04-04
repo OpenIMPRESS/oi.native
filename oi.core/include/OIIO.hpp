@@ -33,7 +33,8 @@ namespace oi { namespace core { namespace io {
 	public: // TODO: mode
 		IOMeta(std::string filePath, std::string session_name); // read from file at startup into memory
 		IOMeta(std::string filePath, std::string session_name, std::vector<std::pair<uint8_t, uint8_t>> channels); // initialize meta with these channels (start new file)
-		void add_entry(OI_META_ENTRY entry); // append at runtime (to memory and disk)
+		//void add_entry(OI_META_ENTRY entry); // append at runtime (to memory and disk)
+        void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length);
 
 		uint64_t prev_entry_time(uint32_t channel, uint64_t time); // return the first smaller timestamp
 		uint64_t next_entry_time(uint32_t channel, uint64_t time); // return the first bigger timestamp

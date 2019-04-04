@@ -60,6 +60,7 @@ namespace oi { namespace core { namespace io {
 		}
 
 		std::string filename_meta = filePath + session_name + ".meta";
+        //mkdir(filePath + session_name);
 		out_meta = new std::ofstream(filename_meta, std::ios::binary | std::ios::out | std::ios::trunc);
 		if (out_meta->fail()) throw "failed to open meta file for session.";
 		out_meta->write((const char*)& meta_header.sessionTimestamp, sizeof(meta_header.sessionTimestamp));
@@ -71,8 +72,15 @@ namespace oi { namespace core { namespace io {
 		}
 	}
 
-	void IOMeta::add_entry(OI_META_ENTRY meta_entry) {
+	void IOMeta::add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length) {
 		if (out_meta == nullptr) throw "tried to write to RO meta object";
+        if (meta_header.sessionTimestamp > originalTimestamp) throw "cannot add entry with timestamp before session start...";
+        
+        OI_META_ENTRY meta_entry;
+        meta_entry.channelIdx = channelIdx;
+        meta_entry.timeOffset = originalTimestamp - meta_header.sessionTimestamp;
+        meta_entry.data_start = data_start;
+        meta_entry.data_length = data_length;
 		meta[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
 		out_meta->write((const char*)& meta_entry, sizeof(OI_META_CHANNEL_HEADER));
 	}

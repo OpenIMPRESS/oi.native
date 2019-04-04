@@ -331,15 +331,15 @@ namespace oi { namespace core { namespace worker {
     template <class DataObjectT>
     DataObjectAcquisition<DataObjectT>::DataObjectAcquisition(DataObjectAcquisition&& that) {
         data = std::move(that.data);
-        _enqueue = that._enqueue;
-		that._enqueue = false;
+        _continue = that._continue;
+		that._continue = false;
     };
     
     template <class DataObjectT>
     DataObjectAcquisition<DataObjectT>& DataObjectAcquisition<DataObjectT>::operator=(DataObjectAcquisition<DataObjectT>&& that) {
         data = std::move(that.data);
-        _enqueue = that._enqueue;
-        that._enqueue = false;
+        _continue = that._continue;
+        that._continue = false;
         return *this;
     };
 } } }
