@@ -103,7 +103,7 @@ namespace oi { namespace core {
         uint8_t  msg_type;     //
         uint8_t  msg_format;   // in body, is it binary, json, raw string, protobuf, ...
         uint8_t  msg_flags;    // ~ has multipart header, has source data, ...
-        uint32_t msg_sequence; // Total size of body in all parts
+        uint32_t msg_sequence; // ...
         uint32_t body_start;   // where does content start
         uint32_t body_length;  // how long is the content
         uint32_t source_id;    // ...
@@ -189,8 +189,8 @@ namespace oi { namespace core {
     
     typedef struct {
         OI_LEGACY_HEADER header;
-        uint16_t  n_bodies;
         uint16_t  unused1 = 0x00;
+		uint16_t  n_bodies;
         uint32_t  unused2 = 0x00;
         //uint64_t timestamp;
         // followed by BODY_STRUCT * body_data
@@ -280,6 +280,30 @@ namespace oi { namespace core {
             return result;
         }
     };
+
+	// TODO: add friendly name?
+	struct OI_META_CHANNEL_HEADER {
+		uint32_t channelIdx;
+		uint8_t packageFamily;
+		uint8_t packageType;
+		uint8_t unused1;
+		uint8_t unused2;
+	};
+
+	struct OI_META_ENTRY {
+		uint32_t channelIdx;
+		uint64_t timeOffset;
+		uint64_t data_start;
+		uint32_t data_length;
+	};
+
+	struct OI_META_FILE_HEADER {
+		uint64_t sessionTimestamp;
+		uint32_t channelCount;
+		uint32_t unused1; // version?
+		OI_META_CHANNEL_HEADER * channelHeader;
+		//OI_META_ENTRY * metaEntries;
+	};
     
     /*
     // todo
