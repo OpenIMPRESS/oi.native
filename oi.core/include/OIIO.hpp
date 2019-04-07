@@ -37,9 +37,9 @@ namespace oi { namespace core { namespace io {
 		std::string getDataPath(MsgType msgType);
 		uint32_t getChannel(MsgType msgType);
 
-		uint64_t prev_entry_time(uint32_t channel, uint64_t time); // return the first smaller timestamp
-		uint64_t next_entry_time(uint32_t channel, uint64_t time); // return the first bigger timestamp
-		int32_t  entries_at_time(OI_META_ENTRY * out, uint32_t channel, uint64_t time); // write references to out for all frames with timestamp time (return number of entries);
+		int64_t prev_entry_time(uint32_t channel, int64_t time); // return the first smaller timestamp
+        int64_t next_entry_time(uint32_t channel, int64_t time); // return the first bigger timestamp
+		std::vector<oi::core::OI_META_ENTRY> * entries_at_time(uint32_t channel, int64_t time);
 		void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length);
 		bool is_readonly();
 	private:
@@ -52,19 +52,148 @@ namespace oi { namespace core { namespace io {
 	template <class DataObjectT>
 	class IOChannel {
 	public:
-		IOChannel(MsgType t, IOMeta * meta);
+		IOChannel(MsgType t, IOMeta * meta, oi::core::worker::ObjectPool<DataObjectT> * src_pool);
 		// TODO: set/change meta on the fly?
 		void setReader(uint64_t t);
-		uint64_t read(uint64_t t, bool skip, oi::core::worker::WorkerQueue<DataObjectT> * out_queue);
+        void setStart();
+        void setEnd();
+        int64_t getReader();
+		int64_t read(int64_t t, bool direction, bool skip, oi::core::worker::WorkerQueue<DataObjectT> * out_queue);
 		void write(uint64_t originalTimestamp, uint8_t * data, size_t len);
-	private:
+    protected:
+        virtual void readImpl(size_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue);
+        oi::core::worker::ObjectPool<DataObjectT> * src_pool;
+        std::ifstream * reader;
+        std::ofstream * writer;
 		MsgType type;
-		uint64_t last_frame_time;
-		uint64_t last_time;
-		std::ifstream * reader;
-		std::ofstream * writer;
+		int64_t last_frame_time;
 		int32_t channelIdx;
 		IOMeta * meta;
+        int64_t last_frame_served_time = 0;
 	};
     
+    
+    template<class DataObjectT>
+    IOChannel<DataObjectT>::IOChannel(MsgType type, IOMeta * meta, oi::core::worker::ObjectPool<DataObjectT> * src_pool) {
+        this->src_pool = src_pool;
+        this->meta = meta;
+        this->channelIdx = this->meta->getChannel(type);
+        this->type = type;
+        
+        this->reader = new std::ifstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
+        if (!this->meta->is_readonly()) {
+            this->writer = new std::ofstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::out | std::ios::trunc);
+        } else {
+            this->writer = nullptr;
+        }
+    }
+    
+    template<class DataObjectT>
+    void IOChannel<DataObjectT>::write(uint64_t originalTimestamp, uint8_t * data, size_t len)    {
+        if (this->writer == nullptr) throw "cannot write. its a readonly channel";
+        std::streampos data_start = this->writer->tellp();
+        this->writer->write((const char*)data, len);
+        std::streampos data_end = this->writer->tellp();
+        if (data_end - data_start != len) throw "wrote more/less than planned.";
+        this->meta->add_entry(this->channelIdx, originalTimestamp, data_start, len);
+    }
+    
+    template<class DataObjectT>
+    void IOChannel<DataObjectT>::setReader(uint64_t t) {
+        last_frame_served_time = t;
+    }
+    
+    template<class DataObjectT>
+    int64_t IOChannel<DataObjectT>::getReader() {
+        return last_frame_served_time;
+    }
+    
+    template<class DataObjectT>
+    void IOChannel<DataObjectT>::setStart() {
+        last_frame_served_time = meta->next_entry_time(this->channelIdx, LONG_MIN) - 1;
+    }
+    
+    template<class DataObjectT>
+    void IOChannel<DataObjectT>::setEnd() {
+        last_frame_served_time = meta->prev_entry_time(this->channelIdx, LONG_MAX) + 1;
+    }
+    
+    template<class DataObjectT>
+    void IOChannel<DataObjectT>::readImpl(size_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
+        printf("ERROR: must overload readImpl");
+    }
+    
+    template<class DataObjectT>
+    int64_t IOChannel<DataObjectT>::read(int64_t t, bool forwards, bool skip, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
+        
+        // TOWARDS TIME
+        //forwards = t > last_frame_served_time;
+        int64_t closest_prev_frame_time = meta->prev_entry_time(this->channelIdx, t);
+        int64_t closest_next_frame_time = meta->next_entry_time(this->channelIdx, t);
+        bool at_start = closest_prev_frame_time > t;
+        bool at_end = closest_next_frame_time < t;
+        
+        if (at_end && at_start) {
+            printf("EMPTY META\n");
+            return -1; // EMPTY META
+        }
+        
+        if (forwards && (at_start ||
+                        (last_frame_served_time == closest_prev_frame_time))) {
+            return closest_next_frame_time - t; // will return a negative number if at end
+        }
+        if (!forwards && (at_end ||
+                         (last_frame_served_time == closest_next_frame_time))) {
+            return t - closest_prev_frame_time; // will return a negative number if at start
+        }
+        
+        if (!skip && ((forwards && last_frame_served_time > closest_prev_frame_time) ||
+                     (!forwards && last_frame_served_time < closest_next_frame_time))) {
+            skip = true;
+        }
+        int64_t next_frame_time = 0;
+        if (!skip) {
+            if (forwards) {
+                next_frame_time = meta->next_entry_time(this->channelIdx, last_frame_served_time);
+            } else {
+                next_frame_time = meta->prev_entry_time(this->channelIdx, last_frame_served_time);
+            }
+        } else {
+            if (forwards) {
+                next_frame_time = closest_prev_frame_time;
+            } else {
+                next_frame_time = closest_next_frame_time;
+            }
+        }
+        
+        do {
+            std::vector<oi::core::OI_META_ENTRY> * list = meta->entries_at_time(this->channelIdx, next_frame_time);
+            std::vector<oi::core::OI_META_ENTRY>::iterator it = list->begin();
+            //if (it == list->end()) throw "WTF";
+            while (it != list->end()) {
+                uint64_t reader_pos = reader->tellg();
+                if (reader_pos < it->data_start) {
+                    std::streamsize skip_bytes = it->data_start - reader_pos;
+                    reader->seekg(skip_bytes, std::ios::cur);
+                } else if (reader_pos > it->data_start) {
+                    reader->seekg(it->data_start, std::ios::beg);
+                }
+                
+                this->readImpl(it->data_length, out_queue);
+                it++;
+            }
+            last_frame_served_time = next_frame_time;
+            if (forwards) {
+                next_frame_time = meta->next_entry_time(this->channelIdx, last_frame_served_time);
+                if (next_frame_time < last_frame_served_time) break;
+            } else {
+                next_frame_time = meta->prev_entry_time(this->channelIdx, last_frame_served_time);
+                if (next_frame_time > last_frame_served_time) break;
+            }
+        } while ((forwards && (next_frame_time <= t)) || (!forwards && (next_frame_time >= t)));
+        if  (forwards) return next_frame_time - t;
+        else           return t - next_frame_time;
+    }
+    
+
 } } }

@@ -42,6 +42,7 @@ namespace oi { namespace core { namespace io {
 		in_meta.close();
 		in_meta.clear();
 		out_meta = nullptr; // READ ONLY!
+        printf("META IS READONLY\n");
 	}
 
 	// RW constructor ?
@@ -65,14 +66,14 @@ namespace oi { namespace core { namespace io {
 		printf("mkdir: %s, %d\n", filePath.c_str(), oi_mkdir(filePath));
 		printf("mkdir: %s, %d\n", dataPath.c_str(), oi_mkdir(dataPath));
 
-		out_meta = new std::ofstream(filename_meta, std::ios::binary | std::ios::out | std::ios::trunc);
-		if (out_meta->fail()) throw "failed to open meta file for session.";
-		out_meta->write((const char*)& meta_header.sessionTimestamp, sizeof(meta_header.sessionTimestamp));
-		out_meta->write((const char*)& meta_header.channelCount, sizeof(meta_header.channelCount));
-		out_meta->write((const char*)& meta_header.unused1, sizeof(meta_header.unused1));
+		this->out_meta = new std::ofstream(filename_meta, std::ios::binary | std::ios::out | std::ios::trunc);
+		if (this->out_meta->fail()) throw "failed to open meta file for session.";
+		this->out_meta->write((const char*)& meta_header.sessionTimestamp, sizeof(meta_header.sessionTimestamp));
+		this->out_meta->write((const char*)& meta_header.channelCount, sizeof(meta_header.channelCount));
+		this->out_meta->write((const char*)& meta_header.unused1, sizeof(meta_header.unused1));
 
 		for (uint32_t i = 0; i < meta_header.channelCount; i++) {
-			out_meta->write((const char*)& meta_header.channelHeader[i], sizeof(OI_META_CHANNEL_HEADER));
+			this->out_meta->write((const char*)& meta_header.channelHeader[i], sizeof(OI_META_CHANNEL_HEADER));
 		}
 	}
 	/*
@@ -85,6 +86,10 @@ namespace oi { namespace core { namespace io {
 		}
 	}
 	*/
+    bool IOMeta::is_readonly() {
+        return this->out_meta == nullptr;
+    }
+
 
 	void IOMeta::add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length) {
 		if (out_meta == nullptr) throw "tried to write to RO meta object";
@@ -101,7 +106,7 @@ namespace oi { namespace core { namespace io {
 
 	std::string IOMeta::getDataPath(MsgType msgType) {
 		uint32_t c = getChannel(msgType);
-		return dataPath + "/" + ("channel_"+c) + ".oidata";
+        return dataPath + "/" + ("channel_"+std::to_string(c)) + ".oidata";
 	}
 
 	uint32_t IOMeta::getChannel(MsgType msgType) {
@@ -114,100 +119,26 @@ namespace oi { namespace core { namespace io {
 		return 0;
 	}
 
-	uint64_t IOMeta::prev_entry_time(uint32_t channel, uint64_t time) {
-		return uint64_t();
+	int64_t IOMeta::prev_entry_time(uint32_t channel, int64_t time) {
+        std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].lower_bound(time);
+        if (entry == meta[channel].begin()) {
+            return time + 1;
+        }
+        
+        //--entry;
+        return std::prev(entry)->first;
 	}
 
-	uint64_t IOMeta::next_entry_time(uint32_t channel, uint64_t time) {
-		return uint64_t();
+	int64_t IOMeta::next_entry_time(uint32_t channel, int64_t time) {
+        std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].upper_bound(time);
+        if (entry == meta[channel].end()) {
+            return time - 1;
+        }
+        return entry->first;
 	}
 
-	int32_t IOMeta::entries_at_time(OI_META_ENTRY * out, uint32_t channel, uint64_t time) {
-		return int32_t();
+    std::vector<oi::core::OI_META_ENTRY> * IOMeta::entries_at_time(uint32_t channel, int64_t time) {
+        return &(meta[channel][time]);
 	}
-
-
-	template<class DataObjectT>
-	IOChannel<DataObjectT>::IOChannel(MsgType type, IOMeta * meta) {
-		this->meta = meta;
-		this->channelIdx = this->meta->getChannel(type);
-		this->type = type;
-
-		this->reader = new std::ifstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
-		if (this->meta->is_readonly()) {
-			this->writer = new std::ofstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::out | std::ios::trunc);
-		} else this->writer = nullptr;
-	}
-
-	template<class DataObjectT>
-	void IOChannel<DataObjectT>::write(uint64_t originalTimestamp, uint8_t * data, size_t len)	{
-		if (this->writer == nullptr) throw "cannot write. its a readonly channel";
-		std::streampos data_start = this->writer->tellp();
-		this->writer->write((const char*)data, len);
-		std::streampos data_end = this->writer->tellp();
-		if (data_end - data_start != len) throw "wrote more/less than planned.";
-		this->meta->add_entry(this->channelIdx, originalTimestamp, data_start, len);
-	}
-
-	template<class DataObjectT>
-	void IOChannel<DataObjectT>::setReader(uint64_t t) {
-		last_time = t;
-	}
-
-	template<class DataObjectT>
-	uint64_t IOChannel<DataObjectT>::read(uint64_t t, bool skip, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
-		bool forwards = true;
-		if (last_time > t) forwards = false;
-		last_time = t; // TODO: set this timestamp to the last actually played time?
-		uint64_t next_frame_time;
-		if (forwards) next_frame_time = meta->prev_entry_time(this->channelIdx, t); // up and until this frametime
-		else next_frame_time = meta->next_entry_time(this->channelIdx, t);
-
-		if (next_frame_time == last_frame_time) {
-			if (forwards) return meta->next_entry_time(next_frame_time, t) - t;
-			else return t - meta->prev_entry_time(next_frame_time, t);
-		}
-
-		uint64_t current_frame_time; // where do we continue with sending?
-		if (forwards && !skip) {
-			current_frame_time = next_entry_time(last_frame_time); // continuing with the frame after the last one sent;
-		}
-		else if (!forwards && !skip) {
-			current_frame_time = prev_entry_time(last_frame_time); // continuing with the frame after the last one sent;
-		}
-		else {
-			current_frame_time = next_frame_time; // continue from an earlier frame (skipping back)
-		}
-
-		do {
-			OI_META_ENTRY meta_entries[32];
-			int n_packets = meta->entries_at_time(&meta_entries, this->channelIdx, current_frame_time);
-			for (int i = 0; i < n_packets; i++) {
-				uint64_t reader_pos = reader->tellg();
-				if (reader_pos < meta_entries[i].data_start) {
-					std::streamsize skip_bytes = meta_entries[i].data_start - reader_pos;
-					reader->seekg(skip_bytes, std::ios::cur);
-				}
-				else if (reader_pos > meta_entries[i].data_start) {
-					reader->seekg(meta_entries[i].data_start, std::ios::beg);
-				}
-                // read into doa?
-				//reader->read(reinterpret_cast<char *>(&(dc_audio->dataBuffer[writeOffset])), meta_entries[i].data_length);
-			}
-			last_frame_time = current_frame_time;
-			// TODO: if current_frame_time is out of range
-			if (forwards) {
-				current_frame_time = meta->next_entry_time(this->channelIdx, current_frame_time);
-			}
-			else {
-				current_frame_time = meta->prev_entry_time(this->channelIdx, current_frame_time);
-			}
-		} while (last_frame_time < next_frame_time);
-
-		// todo: what if at end?
-		if (forwards) return meta->next_entry_time(this->channelIdx, t) - t;
-		else return t - meta->prev_entry_time(this->channelIdx, t);
-	}
-
 
 } } }

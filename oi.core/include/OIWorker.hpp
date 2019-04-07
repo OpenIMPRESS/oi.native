@@ -78,6 +78,7 @@ namespace oi { namespace core { namespace worker {
         ~WorkerQueue();
         //ObjectPool<DataObjectT> * object_pool();
         void close();
+        bool is_open();
         void notify_all();
     protected:
         std::unique_ptr<DataObjectT> _get_data(W_FLOW f, int32_t timeout);
@@ -215,6 +216,11 @@ namespace oi { namespace core { namespace worker {
             _running = false;
             notify_all();
         }
+    }
+    
+    template <class DataObjectT>
+    bool WorkerQueue<DataObjectT>::is_open() {
+        return _running;
     }
     
     template <class DataObjectT>
