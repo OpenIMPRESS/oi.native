@@ -45,4 +45,5 @@ namespace oi { namespace core {
     void debugMemory(unsigned char * loc, size_t len);
     
 	int oi_mkdir(std::string path);
+	char oi_path_sep();
 } }

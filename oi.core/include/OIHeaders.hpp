@@ -294,9 +294,9 @@ namespace oi { namespace core {
 
 	struct OI_META_ENTRY {
 		uint32_t channelIdx;
-		uint64_t timeOffset;
+		int64_t timeOffset;
 		uint64_t data_start;
-		uint32_t data_length;
+		uint64_t data_length;
 	};
 
 	struct OI_META_FILE_HEADER {

@@ -40,10 +40,10 @@ namespace oi { namespace core { namespace io {
 		int64_t prev_entry_time(uint32_t channel, int64_t time); // return the first smaller timestamp
         int64_t next_entry_time(uint32_t channel, int64_t time); // return the first bigger timestamp
 		std::vector<oi::core::OI_META_ENTRY> * entries_at_time(uint32_t channel, int64_t time);
-		void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length);
+		void add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint64_t data_length);
 		bool is_readonly();
 	private:
-		std::map<uint32_t, std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>> meta;
+		std::map<uint32_t, std::map<int64_t, std::vector<oi::core::OI_META_ENTRY>>> meta;
 		OI_META_FILE_HEADER meta_header;
 		std::ofstream * out_meta;
 		std::string dataPath;
@@ -54,17 +54,18 @@ namespace oi { namespace core { namespace io {
 	public:
 		IOChannel(MsgType t, IOMeta * meta, oi::core::worker::ObjectPool<DataObjectT> * src_pool);
 		// TODO: set/change meta on the fly?
-		void setReader(uint64_t t);
+		void setReader(int64_t t);
         void setStart();
         void setEnd();
         int64_t getReader();
 		int64_t read(int64_t t, bool direction, bool skip, oi::core::worker::WorkerQueue<DataObjectT> * out_queue);
 		void write(uint64_t originalTimestamp, uint8_t * data, size_t len);
     protected:
-        virtual void readImpl(size_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue);
+        virtual void readImpl(uint64_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue);
         oi::core::worker::ObjectPool<DataObjectT> * src_pool;
-        std::ifstream * reader;
-        std::ofstream * writer;
+		std::fstream * file;
+        //std::ifstream * reader;
+        //std::ofstream * writer;
 		MsgType type;
 		int64_t last_frame_time;
 		int32_t channelIdx;
@@ -80,26 +81,50 @@ namespace oi { namespace core { namespace io {
         this->channelIdx = this->meta->getChannel(type);
         this->type = type;
         
-        this->reader = new std::ifstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
+		printf("CHANNEL FILE: %s\n", this->meta->getDataPath(this->type).c_str());
+
+		this->file = new std::fstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc);
+
+			/*
         if (!this->meta->is_readonly()) {
             this->writer = new std::ofstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::out | std::ios::trunc);
+			if (this->writer->fail()) {
+				std::cout << "Error: " << strerror(errno);
+				throw "FAILED TO OPEN WRITER";
+			}
+			if (!this->writer->is_open()) {
+				std::cout << "Error: " << strerror(errno);
+				throw "WRITER NOT OPEN";
+			}
+			this->writer->clear();
+			this->writer->seekp(0, std::ios::beg);
         } else {
             this->writer = nullptr;
         }
+
+		this->reader = new std::ifstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
+		if (this->reader->fail()) {
+			std::cout << "Error: " << strerror(errno);
+			throw "FAILED TO OPEN READER";
+		}
+		if (!this->reader->is_open()) {
+			std::cout << "Error: " << strerror(errno);
+			throw "READER NOT OPEN";
+		}*/
     }
     
     template<class DataObjectT>
     void IOChannel<DataObjectT>::write(uint64_t originalTimestamp, uint8_t * data, size_t len)    {
-        if (this->writer == nullptr) throw "cannot write. its a readonly channel";
-        std::streampos data_start = this->writer->tellp();
-        this->writer->write((const char*)data, len);
-        std::streampos data_end = this->writer->tellp();
+        //if (this->file == nullptr) throw "cannot write. its a readonly channel";
+        uint64_t data_start = this->file->tellp();
+        this->file->write((const char*)data, len);
+		uint64_t data_end = this->file->tellp();
         if (data_end - data_start != len) throw "wrote more/less than planned.";
         this->meta->add_entry(this->channelIdx, originalTimestamp, data_start, len);
     }
     
     template<class DataObjectT>
-    void IOChannel<DataObjectT>::setReader(uint64_t t) {
+    void IOChannel<DataObjectT>::setReader(int64_t t) {
         last_frame_served_time = t;
     }
     
@@ -169,16 +194,19 @@ namespace oi { namespace core { namespace io {
         do {
             std::vector<oi::core::OI_META_ENTRY> * list = meta->entries_at_time(this->channelIdx, next_frame_time);
             std::vector<oi::core::OI_META_ENTRY>::iterator it = list->begin();
-            //if (it == list->end()) throw "WTF";
+			//file->seekg(0, file->end);
+			//uint64_t length = file->tellg();
+			//file->seekg(0, file->beg);
+			//printf("LENGTH: %lld\n", length);
             while (it != list->end()) {
-                uint64_t reader_pos = reader->tellg();
+                uint64_t reader_pos = file->tellg();
                 if (reader_pos < it->data_start) {
-                    std::streamsize skip_bytes = it->data_start - reader_pos;
-                    reader->seekg(skip_bytes, std::ios::cur);
+					uint64_t skip_bytes = it->data_start - reader_pos;
+					file->seekg(skip_bytes, std::ios::cur);
                 } else if (reader_pos > it->data_start) {
-                    reader->seekg(it->data_start, std::ios::beg);
+					file->seekg(it->data_start, std::ios::beg);
                 }
-                
+
                 this->readImpl(it->data_length, out_queue);
                 it++;
             }

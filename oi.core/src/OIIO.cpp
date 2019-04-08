@@ -60,7 +60,7 @@ namespace oi { namespace core { namespace io {
 			meta_header.channelHeader[i].unused2 = 0;
 		}
 
-		dataPath = filePath + "/" + session_name;
+		dataPath = filePath + oi::core::oi_path_sep() + session_name;
 		std::string filename_meta = dataPath + ".oimeta";
 		
 		printf("mkdir: %s, %d\n", filePath.c_str(), oi_mkdir(filePath));
@@ -91,13 +91,13 @@ namespace oi { namespace core { namespace io {
     }
 
 
-	void IOMeta::add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint32_t data_length) {
+	void IOMeta::add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint64_t data_length) {
 		if (out_meta == nullptr) throw "tried to write to RO meta object";
         if (meta_header.sessionTimestamp > originalTimestamp) throw "cannot add entry with timestamp before session start...";
         
         OI_META_ENTRY meta_entry;
         meta_entry.channelIdx = channelIdx;
-        meta_entry.timeOffset = originalTimestamp - meta_header.sessionTimestamp;
+        meta_entry.timeOffset = (int64_t) originalTimestamp - meta_header.sessionTimestamp;
         meta_entry.data_start = data_start;
         meta_entry.data_length = data_length;
 		meta[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
@@ -106,7 +106,7 @@ namespace oi { namespace core { namespace io {
 
 	std::string IOMeta::getDataPath(MsgType msgType) {
 		uint32_t c = getChannel(msgType);
-        return dataPath + "/" + ("channel_"+std::to_string(c)) + ".oidata";
+        return dataPath + oi::core::oi_path_sep() + ("channel_"+std::to_string(c)) + ".oidata";
 	}
 
 	uint32_t IOMeta::getChannel(MsgType msgType) {
@@ -120,7 +120,7 @@ namespace oi { namespace core { namespace io {
 	}
 
 	int64_t IOMeta::prev_entry_time(uint32_t channel, int64_t time) {
-        std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].lower_bound(time);
+        std::map<int64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].lower_bound(time);
         if (entry == meta[channel].begin()) {
             return time + 1;
         }
@@ -130,7 +130,7 @@ namespace oi { namespace core { namespace io {
 	}
 
 	int64_t IOMeta::next_entry_time(uint32_t channel, int64_t time) {
-        std::map<uint64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].upper_bound(time);
+        std::map<int64_t, std::vector<oi::core::OI_META_ENTRY>>::iterator entry = meta[channel].upper_bound(time);
         if (entry == meta[channel].end()) {
             return time - 1;
         }

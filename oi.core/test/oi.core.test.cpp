@@ -40,10 +40,10 @@ protected:
 */
 
 template<>
-void IOChannel<TestObject>::readImpl(size_t len, oi::core::worker::WorkerQueue<TestObject>* out_queue) {
+void IOChannel<TestObject>::readImpl(uint64_t len, oi::core::worker::WorkerQueue<TestObject>* out_queue) {
     worker::DataObjectAcquisition<TestObject> doa(this->src_pool, worker::W_FLOW_BLOCKING);
     if (!doa.data) throw "failed to read";
-    this->reader->read((char*) & (doa.data->buffer[0]), len);
+    this->file->read((char*) & (doa.data->buffer[0]), len);
     doa.data->data_start = 0;
     doa.data->data_end = len;
     doa.enqueue(out_queue);
@@ -169,50 +169,50 @@ public:
         IOChannel<TestObject> channelB(channelB_type, meta, pool);
         
         for (int i = 0; i < 20; i++) {
-            std::string a_data = "Hello World A "+ std::to_string(i);
-            std::string b_data = "Hello World B "+ std::to_string(i);
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            channelA.write(NOW().count(), (uint8_t *) a_data.c_str(), a_data.length());
+			std::string a_data("Hello World XA " + std::to_string(i));
+			channelA.write(NOW().count(), (uint8_t *)a_data.c_str(), a_data.length());
+
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			std::string b_data("Hello World XB " + std::to_string(i));
             channelB.write(NOW().count(), (uint8_t *) b_data.c_str(), b_data.length());
-            //meta->add_entry(0, NOW().count(), i * entryLength, entryLength);
         }
         
         std::thread * tConsume = new std::thread(&OIIOTest::replay, this);
         
-        uint64_t t_0 = NOW().count();
+        int64_t t_0 = NOW().count();
         channelA.setStart();
         channelB.setStart();
+		int64_t dt_a = 0;
+		int64_t dt_b = 0;
         while (true) {
-            uint64_t t_replay = NOW().count() - t_0;
-            int32_t dt_a = channelA.read(t_replay, true, false, worker);
-            int32_t dt_b = channelB.read(t_replay, true, false, worker);
-            if (dt_a < 0 && dt_b < 0) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            int64_t t_replay =  NOW().count() - t_0;
+			if (dt_a >= 0) dt_a = channelA.read(t_replay, true, false, worker);
+			if (dt_b >= 0) dt_b = channelB.read(t_replay, true, false, worker);
+            if (dt_a < 0 && dt_b < 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
-        printf("=========================\n");
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         channelA.setEnd();
         channelB.setEnd();
         t_0 = NOW().count();
         uint64_t t_end = std::max(channelA.getReader(), channelB.getReader());
+		dt_a = 0;
+		dt_b = 0;
         while (true) {
             uint64_t t_replay = t_end - (NOW().count() - t_0);
-            int32_t dt_a = channelA.read(t_replay, false, false, worker);
-            int32_t dt_b = channelB.read(t_replay, false, false, worker);
-            if (dt_a < 0 && dt_b < 0) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+			if (dt_a >= 0) dt_a = channelA.read(t_replay, false, false, worker);
+			if (dt_b >= 0) dt_b = channelB.read(t_replay, false, false, worker);
+			if (dt_a < 0 && dt_b < 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
         
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        
+
         worker->close();
         printf("replay thread closed\n");
         tConsume->join();
@@ -223,9 +223,10 @@ public:
         while (worker->is_open()) {
             DataObjectAcquisition<TestObject> doa(worker, W_FLOW_BLOCKING);
             if (!doa.data) continue;
-            size_t len = doa.data->data_end - doa.data->data_start;
+            uint64_t len = doa.data->data_end - doa.data->data_start;
             std::string msg((char*)&(doa.data->buffer[doa.data->data_start]), len);
-            printf("Replay: %s\n", msg.c_str());
+			//std::string msg((char*)&(doa.data->buffer[0]), 10);
+            printf("Replay %lld: %s\n", len, msg.c_str());
         }
         worker->notify_all();
         printf("replay worker end\n");
@@ -241,6 +242,6 @@ int main(int argc, char* argv[]) {
 	printf("Running in %s\n", path.c_str());
     //OICoreTest test("HI");
 
-	std::string dataPath = path + "/data";
+	std::string dataPath = path + oi::core::oi_path_sep() + "data";
     OIIOTest testIO(dataPath);
 }

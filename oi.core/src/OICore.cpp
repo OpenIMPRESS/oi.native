@@ -52,6 +52,14 @@ namespace oi { namespace core {
         printf("+\n+++++++++++++++++++++++++++++++++++++++++++\n\n");
     }
 
+	char oi_path_sep() {
+#ifdef _WIN32
+		return '\\';
+#else
+		return '/';
+#endif
+	}
+
 	int oi_mkdir(std::string sPath) {
 		int nError = 0;
 #if defined(_WIN32)
