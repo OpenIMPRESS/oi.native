@@ -21,34 +21,47 @@ namespace oi { namespace core { namespace io {
 	
 	// RO constructor ?
 	IOMeta::IOMeta(std::string filePath, std::string session_name) {
-		std::string filename_meta = filePath + session_name + ".meta";
-		std::ifstream in_meta;
-		in_meta.open(filename_meta, std::ios::binary | std::ios::in);
-		if (in_meta.fail()) throw "existing meta file for session not found.";
-
-		in_meta.read(reinterpret_cast<char *>(&meta_header.sessionTimestamp), sizeof(meta_header.sessionTimestamp));
-		in_meta.read(reinterpret_cast<char *>(&meta_header.channelCount), sizeof(meta_header.channelCount));
-		in_meta.read(reinterpret_cast<char *>(&meta_header.unused1), sizeof(meta_header.unused1));
-		in_meta.read(reinterpret_cast<char *>(&meta_header.channelHeader), sizeof(oi::core::OI_META_CHANNEL_HEADER) * meta_header.channelCount);
-
+        dataPath = filePath + oi::core::oi_path_sep() + session_name;
+        std::string filename_meta = dataPath + ".oimeta";
+        file = new std::fstream(filename_meta, std::ios::binary | std::ios::in);
+		if (file->fail() || !file->is_open()) throw "existing meta file for session not found.";
+        //in_meta.clear();
+        //in_meta.seekg(0, std::ios::beg);
+		file->read(reinterpret_cast<char *>(&meta_header.sessionTimestamp), sizeof(meta_header.sessionTimestamp));
+		file->read(reinterpret_cast<char *>(&meta_header.channelCount), sizeof(meta_header.channelCount));
+		file->read(reinterpret_cast<char *>(&meta_header.unused1), sizeof(meta_header.unused1));
+        
+        printf("META t0: %lld channels %d\n", meta_header.sessionTimestamp, meta_header.channelCount);
+        if (meta_header.channelCount > 2) {
+            throw "failed reading";
+        }
+        
+        meta_header.channelHeader = new OI_META_CHANNEL_HEADER[meta_header.channelCount];
+        for (int i = 0; i < meta_header.channelCount; i++) {
+            file->read(reinterpret_cast<char *>(&meta_header.channelHeader[i]), sizeof(oi::core::OI_META_CHANNEL_HEADER));
+            printf("\tChannel %d idx: %d, family: %d, type: %d\n",
+                   i, meta_header.channelHeader[i].channelIdx, meta_header.channelHeader[i].packageFamily, meta_header.channelHeader[i].packageType);
+            
+        }
+        
 		while (true) {
 			OI_META_ENTRY meta_entry;
-			in_meta.read(reinterpret_cast<char *>(&meta_entry), sizeof(meta_entry));
-			if (in_meta.eof()) break;
+			file->read(reinterpret_cast<char *>(&meta_entry), sizeof(meta_entry));
+            if (file->eof())  {
+                printf("META EOF\n");
+                break;
+            }
 			//if (_meta.find(meta_entry.channelIdx) == _meta.end()) _meta[meta_entry.channelIdx] = 
 			meta[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
 		}
 
-		in_meta.close();
-		in_meta.clear();
-		out_meta = nullptr; // READ ONLY!
-        printf("META IS READONLY\n");
+		file->close();
 	}
 
 	// RW constructor ?
 	IOMeta::IOMeta(std::string filePath, std::string session_name, std::vector<std::pair<uint8_t, uint8_t>> channels) {
 		meta_header.sessionTimestamp = NOW().count();
-		meta_header.channelCount = channels.size();
+		meta_header.channelCount = (uint32_t) channels.size();
 		meta_header.unused1 = 0;
 		meta_header.channelHeader = new OI_META_CHANNEL_HEADER[meta_header.channelCount];
 
@@ -66,16 +79,21 @@ namespace oi { namespace core { namespace io {
 		printf("mkdir: %s, %d\n", filePath.c_str(), oi_mkdir(filePath));
 		printf("mkdir: %s, %d\n", dataPath.c_str(), oi_mkdir(dataPath));
 
-		this->out_meta = new std::ofstream(filename_meta, std::ios::binary | std::ios::out | std::ios::trunc);
-		if (this->out_meta->fail()) throw "failed to open meta file for session.";
-		this->out_meta->write((const char*)& meta_header.sessionTimestamp, sizeof(meta_header.sessionTimestamp));
-		this->out_meta->write((const char*)& meta_header.channelCount, sizeof(meta_header.channelCount));
-		this->out_meta->write((const char*)& meta_header.unused1, sizeof(meta_header.unused1));
+		file = new std::fstream(filename_meta, std::ios::binary | std::ios::out | std::ios::trunc);
+		if (file->fail() || !file->is_open()) throw "failed to open meta file for session.";
+        //file->clear();
+        //file->seekp(0, std::ios::beg);
+        printf("Writing new meta header: t0: %lld, channels: %d\n", meta_header.sessionTimestamp, meta_header.channelCount);
+		file->write((const char*)& meta_header.sessionTimestamp, sizeof(meta_header.sessionTimestamp));
+		file->write((const char*)& meta_header.channelCount, sizeof(meta_header.channelCount));
+		file->write((const char*)& meta_header.unused1, sizeof(meta_header.unused1));
 
 		for (uint32_t i = 0; i < meta_header.channelCount; i++) {
-			this->out_meta->write((const char*)& meta_header.channelHeader[i], sizeof(OI_META_CHANNEL_HEADER));
+			file->write((const char*)& meta_header.channelHeader[i], sizeof(oi::core::OI_META_CHANNEL_HEADER));
 		}
+        file->flush();
 	}
+    
 	/*
 	init_channels();
 	void IOMeta::init_channels() {
@@ -87,12 +105,12 @@ namespace oi { namespace core { namespace io {
 	}
 	*/
     bool IOMeta::is_readonly() {
-        return this->out_meta == nullptr;
+        return !file->is_open();
     }
 
 
 	void IOMeta::add_entry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint64_t data_length) {
-		if (out_meta == nullptr) throw "tried to write to RO meta object";
+		if (this->is_readonly()) throw "tried to write to RO meta object";
         if (meta_header.sessionTimestamp > originalTimestamp) throw "cannot add entry with timestamp before session start...";
         
         OI_META_ENTRY meta_entry;
@@ -101,7 +119,8 @@ namespace oi { namespace core { namespace io {
         meta_entry.data_start = data_start;
         meta_entry.data_length = data_length;
 		meta[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
-		out_meta->write((const char*)& meta_entry, sizeof(OI_META_CHANNEL_HEADER));
+		file->write((const char*)& meta_entry, sizeof(OI_META_ENTRY));
+        file->flush();
 	}
 
 	std::string IOMeta::getDataPath(MsgType msgType) {

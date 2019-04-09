@@ -27,6 +27,13 @@ namespace oi { namespace core { namespace worker {
         this->_return_to_pool = _pool;
     }
     
+    int DataObject::setData(const void * data, size_t len) {
+        memcpy(&(this->buffer[0]), data, len);
+        this->data_start = 0;
+        this->data_end = len;
+        return len;
+    }
+    
     DataObject::~DataObject() {
     };
     

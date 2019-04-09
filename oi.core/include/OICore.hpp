@@ -22,9 +22,7 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 
 
 #include <stdio.h>  /* defines FILENAME_MAX */
-
-#include "OIIO.hpp"
-#include "OIWorker.hpp"
+#include <chrono>
 
 #if defined(_WIN32)
 #include <direct.h>

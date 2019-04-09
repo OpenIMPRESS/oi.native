@@ -18,6 +18,16 @@
 
 namespace oi { namespace core {
 
+    typedef struct {
+        uint8_t packageFamily;
+        uint8_t packageType;
+    } PackageType;
+    
+    typedef struct {
+        PackageType packageType;
+        uint8_t channel;
+    } ChannelId;
+    
 	typedef std::pair<uint8_t, uint8_t> MsgType;
     
     const int MAX_UDP_PACKET_SIZE = 65500;

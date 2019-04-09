@@ -40,13 +40,20 @@ protected:
 */
 
 template<>
-void IOChannel<TestObject>::readImpl(uint64_t len, oi::core::worker::WorkerQueue<TestObject>* out_queue) {
-    worker::DataObjectAcquisition<TestObject> doa(this->src_pool, worker::W_FLOW_BLOCKING);
-    if (!doa.data) throw "failed to read";
-    this->file->read((char*) & (doa.data->buffer[0]), len);
-    doa.data->data_start = 0;
-    doa.data->data_end = len;
-    doa.enqueue(out_queue);
+std::unique_ptr<TestObject> IOChannel<TestObject>::readImpl(std::istream * in, uint64_t len, std::unique_ptr<TestObject> data) {
+    data->data_start = 0;
+    data->data_end = len;
+    in->read((char*) & (data->buffer[0]), len);
+    return data;
+}
+//oi::core::worker::WorkerQueue<TestObject>* out_queue, oi::core::worker::ObjectPool<TestObject> * pool
+
+template<>
+std::unique_ptr<TestObject> IOChannel<TestObject>::writeImpl(std::ostream * out, std::unique_ptr<TestObject> data, uint64_t & timestamp_out) {
+    uint64_t data_len = data->data_end - data->data_start;
+    out->write((const char*) &(data->buffer[data->data_start]), data_len);
+    timestamp_out = (data->time).count()/1000;
+    return data;
 }
 
 class OICoreTest {
@@ -154,7 +161,7 @@ class OIIOTest {
     ObjectPool<TestObject> * pool;
     
 public:
-    OIIOTest(std::string path) {
+    OIIOTest(std::string path, bool readOnly) {
         pool = new ObjectPool<TestObject>(5, 1024);
         worker = new WorkerQueue<TestObject>();
         
@@ -163,21 +170,40 @@ public:
 		MsgType channelB_type = std::make_pair(0x00, 0x01);
         channels.push_back(channelA_type);
         channels.push_back(channelB_type);
-        meta = new IOMeta(path, "iotest", channels);
+        if (readOnly) {
+            meta = new IOMeta(path, "iotest");
+        } else {
+            meta = new IOMeta(path, "iotest", channels);
+        }
         
         IOChannel<TestObject> channelA(channelA_type, meta, pool);
         IOChannel<TestObject> channelB(channelB_type, meta, pool);
-        
-        for (int i = 0; i < 20; i++) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-			std::string a_data("Hello World XA " + std::to_string(i));
-			channelA.write(NOW().count(), (uint8_t *)a_data.c_str(), a_data.length());
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-			std::string b_data("Hello World XB " + std::to_string(i));
-            channelB.write(NOW().count(), (uint8_t *) b_data.c_str(), b_data.length());
+        if (!meta->is_readonly()) {
+        for (int i = 0; i < 10; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            {
+                std::string a_data("Hello World A " + std::to_string(i));
+                DataObjectAcquisition<TestObject> doa(pool, worker::W_FLOW_BLOCKING);
+                if (!doa.data) throw "NO FREE";
+                doa.data->time = NOW();
+                doa.data->setData(a_data.c_str(), a_data.length());
+                doa.enqueue(&channelA);
+            }
+            channelA.flush();
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            
+            {
+                std::string b_data("Hello World B " + std::to_string(i));
+                DataObjectAcquisition<TestObject> doa(pool, worker::W_FLOW_BLOCKING);
+                if (!doa.data) throw "NO FREE";
+                doa.data->time = NOW();
+                doa.data->setData(b_data.c_str(), b_data.length());
+                doa.enqueue(&channelB);
+            }
+            channelB.flush();
         }
-        
+        }
         std::thread * tConsume = new std::thread(&OIIOTest::replay, this);
         
         int64_t t_0 = NOW().count();
@@ -243,5 +269,6 @@ int main(int argc, char* argv[]) {
     //OICoreTest test("HI");
 
 	std::string dataPath = path + oi::core::oi_path_sep() + "data";
-    OIIOTest testIO(dataPath);
+    OIIOTest testIO(dataPath, false);
+    OIIOTest testIORO(dataPath, true);
 }

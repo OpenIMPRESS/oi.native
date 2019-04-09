@@ -45,12 +45,24 @@ namespace oi { namespace core { namespace io {
 	private:
 		std::map<uint32_t, std::map<int64_t, std::vector<oi::core::OI_META_ENTRY>>> meta;
 		OI_META_FILE_HEADER meta_header;
-		std::ofstream * out_meta;
+        std::fstream * file;
 		std::string dataPath;
 	};
+    
+    // IOChannel<T> c(...);
+    // To write:
+    // doa(unused)
+    // ...write here....
+    // doa->enqueue(c);
+    // c->flush()? (must first release doa)
+    // OR:
+    // c->write(buf, len) (synch? use queue...)
+    // To read:
+    // c->read()
+    // todo: add a thread for writing? or use a central thread of io channels?
 
 	template <class DataObjectT>
-	class IOChannel {
+    class IOChannel : public worker::WorkerQueue<DataObjectT> {
 	public:
 		IOChannel(MsgType t, IOMeta * meta, oi::core::worker::ObjectPool<DataObjectT> * src_pool);
 		// TODO: set/change meta on the fly?
@@ -59,9 +71,12 @@ namespace oi { namespace core { namespace io {
         void setEnd();
         int64_t getReader();
 		int64_t read(int64_t t, bool direction, bool skip, oi::core::worker::WorkerQueue<DataObjectT> * out_queue);
-		void write(uint64_t originalTimestamp, uint8_t * data, size_t len);
+        void flush();
+		//void write(uint64_t originalTimestamp, uint8_t * data, size_t len);
+        int close();
     protected:
-        virtual void readImpl(uint64_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue);
+        virtual std::unique_ptr<DataObjectT> writeImpl(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out);
+        virtual std::unique_ptr<DataObjectT> readImpl(std::istream * in, uint64_t len, std::unique_ptr<DataObjectT> data);
         oi::core::worker::ObjectPool<DataObjectT> * src_pool;
 		std::fstream * file;
         //std::ifstream * reader;
@@ -82,45 +97,31 @@ namespace oi { namespace core { namespace io {
         this->type = type;
         
 		printf("CHANNEL FILE: %s\n", this->meta->getDataPath(this->type).c_str());
-
-		this->file = new std::fstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc);
-
-			/*
-        if (!this->meta->is_readonly()) {
-            this->writer = new std::ofstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::out | std::ios::trunc);
-			if (this->writer->fail()) {
-				std::cout << "Error: " << strerror(errno);
-				throw "FAILED TO OPEN WRITER";
-			}
-			if (!this->writer->is_open()) {
-				std::cout << "Error: " << strerror(errno);
-				throw "WRITER NOT OPEN";
-			}
-			this->writer->clear();
-			this->writer->seekp(0, std::ios::beg);
+        if (this->meta->is_readonly()) {
+            this->file = new std::fstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
+            this->file->seekg(0, std::ios::beg);
         } else {
-            this->writer = nullptr;
+            this->file = new std::fstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc);
         }
-
-		this->reader = new std::ifstream(this->meta->getDataPath(this->type), std::ios::binary | std::ios::in);
-		if (this->reader->fail()) {
-			std::cout << "Error: " << strerror(errno);
-			throw "FAILED TO OPEN READER";
-		}
-		if (!this->reader->is_open()) {
-			std::cout << "Error: " << strerror(errno);
-			throw "READER NOT OPEN";
-		}*/
+        //  ...
     }
     
     template<class DataObjectT>
-    void IOChannel<DataObjectT>::write(uint64_t originalTimestamp, uint8_t * data, size_t len)    {
+    void IOChannel<DataObjectT>::flush() {
         //if (this->file == nullptr) throw "cannot write. its a readonly channel";
-        uint64_t data_start = this->file->tellp();
-        this->file->write((const char*)data, len);
-		uint64_t data_end = this->file->tellp();
-        if (data_end - data_start != len) throw "wrote more/less than planned.";
-        this->meta->add_entry(this->channelIdx, originalTimestamp, data_start, len);
+        while (true) {
+            uint64_t timestamp_out = oi::core::NOW().count();
+            uint64_t data_start = this->file->tellp();
+            {
+                worker::DataObjectAcquisition<DataObjectT> doa(this, worker::W_FLOW_NONBLOCKING);
+                if (!doa.data) return;
+                doa.data = std::move(this->writeImpl(this->file, std::move(doa.data), timestamp_out));
+            }
+            uint64_t data_end = this->file->tellp();
+            uint64_t data_len = data_end - data_start;
+            this->meta->add_entry(this->channelIdx, timestamp_out, data_start, data_len);
+        }
+        this->file->flush();
     }
     
     template<class DataObjectT>
@@ -141,11 +142,6 @@ namespace oi { namespace core { namespace io {
     template<class DataObjectT>
     void IOChannel<DataObjectT>::setEnd() {
         last_frame_served_time = meta->prev_entry_time(this->channelIdx, LONG_MAX) + 1;
-    }
-    
-    template<class DataObjectT>
-    void IOChannel<DataObjectT>::readImpl(uint64_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
-        printf("ERROR: must overload readImpl");
     }
     
     template<class DataObjectT>
@@ -207,7 +203,11 @@ namespace oi { namespace core { namespace io {
 					file->seekg(it->data_start, std::ios::beg);
                 }
 
-                this->readImpl(it->data_length, out_queue);
+                worker::DataObjectAcquisition<DataObjectT> doa(this->src_pool, worker::W_FLOW_BLOCKING);
+                if (!doa.data) throw "failed to read";
+                doa.data = std::move(this->readImpl(file, it->data_length, std::move(doa.data)));
+                doa.enqueue(out_queue);
+                
                 it++;
             }
             last_frame_served_time = next_frame_time;
