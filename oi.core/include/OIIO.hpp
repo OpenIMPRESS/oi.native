@@ -144,7 +144,7 @@ namespace oi { namespace core { namespace io {
     }
     
     template<class DataObjectT>
-    void IOChannel<DataObjectT>::readImpl(size_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
+    void IOChannel<DataObjectT>::readImpl(uint64_t len, oi::core::worker::WorkerQueue<DataObjectT>* out_queue) {
         printf("ERROR: must overload readImpl");
     }
     
