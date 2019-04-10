@@ -10,3 +10,6 @@
 [submodule "oi.clients/oi.client.webcam"]
 	path = oi.clients/oi.client.webcam
 	url = https://github.com/OpenIMPRESS/oi.client.webcam.git
+[submodule "oi.clients/oi.client.rgbd.libfreenect2"]
+	path = oi.clients/oi.client.rgbd.libfreenect2
+	url = https://github.com/OpenIMPRESS/oi.client.rgbd.libfreenect2.git
