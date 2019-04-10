@@ -17,10 +17,30 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 
 #include "RGBDStreamIO.hpp"
 
+
+using namespace oi::core::io;
 using namespace oi::core::rgbd;
 using namespace oi::core::worker;
 using namespace oi::core::network;
 using namespace nlohmann;
+
+template<>
+std::unique_ptr<UDPMessageObject> IOChannel<UDPMessageObject>::readImpl(std::istream * in, uint64_t len, std::unique_ptr<UDPMessageObject> data) {
+	data->data_start = 0;
+	data->data_end = len;
+	in->read((char*) & (data->buffer[0]), len);
+	return data;
+}
+//oi::core::worker::WorkerQueue<TestObject>* out_queue, oi::core::worker::ObjectPool<TestObject> * pool
+
+template<>
+std::unique_ptr<UDPMessageObject> IOChannel<UDPMessageObject>::writeImpl(std::ostream * out, std::unique_ptr<UDPMessageObject> data, uint64_t & timestamp_out) {
+	uint64_t data_len = data->data_end - data->data_start;
+	timestamp_out = NOW().count(); // todo: read from header or add timestamp attribute to UDPMessageObject
+	out->write((const char*) &(data->buffer[data->data_start]), data_len);
+	return data;
+}
+
 
 bool ScheduledRGBDCommand::operator()(ScheduledRGBDCommand left, ScheduledRGBDCommand right) {
 	return left.time > right.time;
@@ -144,10 +164,30 @@ int oi::core::rgbd::RGBDStreamIO::Live() {
 	printf("END Live");
 	return 0;
 }
+int oi::core::rgbd::RGBDStreamIO::RecordReplay() {
+	/* TODO: ...
+	char cCurrentPath[FILENAME_MAX];
+	if (!oi_currentdir(cCurrentPath, sizeof(cCurrentPath))) return errno;
+	std::string path(cCurrentPath);
+	std::string dataPath = path + oi::core::oi_path_sep() + "data";
+
+	std::vector<MsgType> channels;
+	MsgType channelA_type = std::make_pair(0x00, 0x00);
+	MsgType channelB_type = std::make_pair(0x00, 0x01);
+	channels.push_back(channelA_type);
+	channels.push_back(channelB_type);
+
+	oi::core::io::IOMeta meta(path, "iotest", channels);
+	oi::core::io::IOChannel<UDPMessageObject> channelA(channelA_type, &meta, _frame_pool);
+	oi::core::io::IOChannel<UDPMessageObject> channelB(channelB_type, &meta, _frame_pool);
+	*/
+	return 0;
+}
 
 int oi::core::rgbd::RGBDStreamIO::Writer() {
+
+
 	while (true) {
-		// Send data from our queue
 		worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_write, worker::W_FLOW_BLOCKING);
 		if (!doa_s.data) continue;
 	}
@@ -158,6 +198,8 @@ int oi::core::rgbd::RGBDStreamIO::Writer() {
 }
 
 int oi::core::rgbd::RGBDStreamIO::Reader() {
+
+
 	printf("END Reader\n");
 	return 0;
 }

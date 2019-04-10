@@ -23,6 +23,8 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include "UDPConnector.hpp"
 #include "OIHeaders.hpp"
 
+#include "OIIO.hpp"
+
 namespace oi { namespace core { namespace rgbd {
 
 
@@ -69,6 +71,7 @@ namespace oi { namespace core { namespace rgbd {
 
 		int Commands();
 		int Live();
+		int RecordReplay();
 		int Reader();
 		int Writer();
 
