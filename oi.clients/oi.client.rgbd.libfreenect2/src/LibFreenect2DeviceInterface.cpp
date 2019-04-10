@@ -203,6 +203,10 @@ TJPF LibFreenect2DeviceInterface::color_pixel_format() {
     return TJPF_BGRX;
 }
 
+bool LibFreenect2DeviceInterface::supports_depth() {
+    return false;
+}
+
 bool LibFreenect2DeviceInterface::supports_audio() {
     return false;
 }

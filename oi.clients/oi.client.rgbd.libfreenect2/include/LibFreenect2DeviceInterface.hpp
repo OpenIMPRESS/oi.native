@@ -48,6 +48,7 @@ public:
     bool supports_body();
     bool supports_bidx();
     bool supports_hd();
+    bool supports_depth();
     
     std::string device_guid();
     TJPF color_pixel_format();
