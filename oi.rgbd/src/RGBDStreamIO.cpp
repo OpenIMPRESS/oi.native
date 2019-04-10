@@ -92,7 +92,6 @@ int oi::core::rgbd::RGBDStreamIO::Commands() {
 	}
 
 	_commands_queue->notify_all();
-	printf("END Commands");
 	return 0;
 }
 
@@ -154,12 +153,12 @@ int oi::core::rgbd::RGBDStreamIO::Writer() {
 	}
 
 	_queue_write->notify_all();
-	printf("END Writer");
+	printf("END Writer\n");
 	return 0;
 }
 
 int oi::core::rgbd::RGBDStreamIO::Reader() {
-	printf("END Reader");
+	printf("END Reader\n");
 	return 0;
 }
 

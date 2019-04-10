@@ -47,6 +47,10 @@ RGBDDevice::RGBDDevice(RGBDDeviceInterface& device, RGBDStreamIO& io) {
     
     _stream_config.dataFlags = 0;
     
+    if (_device->supports_depth()) {
+        _stream_config.dataFlags |= RGBD_DATA;
+    }
+    
     if (_device->supports_hd()) {
         _stream_config.dataFlags |= HD_DATA;
     }
@@ -63,7 +67,8 @@ RGBDDevice::RGBDDevice(RGBDDeviceInterface& device, RGBDStreamIO& io) {
         _stream_config.dataFlags |= BODY_DATA;
     }
     
-    _stream_config.dataFlags |= RGBD_DATA;
+    
+    //_stream_config.dataFlags |= RGBD_DATA;
     _stream_config.dataFlags |= LIVE_DATA;
     
     std::string guid = device.device_guid();
@@ -296,10 +301,54 @@ int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * d
 }
 
 
-
+int RGBDDevice::QueueJPEGFrame(unsigned char * rgbdata, size_t len, std::chrono::milliseconds timestamp) {
+    DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
+    if (!data_out.data) throw "\nERROR: No free buffers available";
+    IMG_STRUCT * img_header = (IMG_STRUCT *) &(data_out.data->buffer[0]);
+    img_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
+    img_header->header.packageType = OI_MSG_TYPE_RGBD_JPEG;
+    img_header->header.partsTotal = 1;
+    img_header->header.currentPart = 1;
+    img_header->header.sequence = _io->next_sequence_id();
+    img_header->header.timestamp = timestamp.count();
+    img_header->size = len;//(uint32_t) len;
+    //img_header->data = new uint8_t[len];
+    memcpy(&(data_out.data->buffer[sizeof(IMG_STRUCT)]), rgbdata, len);
+    data_out.data->data_start = 0;
+    data_out.data->data_end = sizeof(IMG_STRUCT) + len;
+    data_out.enqueue(_io->live_frame_queue());
+    return data_out.data->data_end;
+}
 
 int RGBDDevice::QueueHDFrame(unsigned char * rgbdata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
-    return -1;
+    DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
+    if (!data_out.data) throw "\nERROR: No free buffers available";
+    IMG_STRUCT * img_header = (IMG_STRUCT *) &(data_out.data->buffer[0]);
+    static size_t header_size = sizeof(IMG_STRUCT);
+    img_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
+    img_header->header.packageType = OI_MSG_TYPE_RGBD_JPEG;
+    img_header->header.partsTotal = 1;
+    img_header->header.currentPart = 1;
+    img_header->header.sequence = _io->next_sequence_id();
+    img_header->header.timestamp = timestamp.count();
+    // COMPRESS COLOR
+    long unsigned int _jpegSize = MAX_UDP_PACKET_SIZE - header_size;
+    unsigned char* _compressedImage = (unsigned char*) &(data_out.data->buffer[header_size]);
+    tjhandle _jpegCompressor = tjInitCompress();
+    tjCompress2(_jpegCompressor, rgbdata, width, 0, height, pix_fmt,
+                &_compressedImage, &_jpegSize, TJSAMP_444, 30,
+                TJFLAG_FASTDCT);
+    if (_jpegSize >= MAX_UDP_PACKET_SIZE) {
+        printf("SKIPPING BIG JPEG: %ld\n", _jpegSize);
+        data_out.release();
+        return 0;
+    }
+    uint64_t c_data_len = header_size + _jpegSize;
+    img_header->size = (uint32_t) _jpegSize;
+    data_out.data->data_start = 0;
+    data_out.data->data_end = c_data_len;
+    data_out.enqueue(_io->live_frame_queue());
+    return c_data_len;
 }
 
 int RGBDDevice::QueueBodyIndexFrame(unsigned char * bidata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {

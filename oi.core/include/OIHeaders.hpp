@@ -63,7 +63,8 @@ namespace oi { namespace core {
         OI_MSG_TYPE_RGBD_CTRL_RESPONSE=0x41,
         OI_MSG_TYPE_RGBD_CTRL_RESPONSE_JSON=0x42, // TODO: replace with content format header...
         OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE=0x51,
-        OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK=0x52
+        OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK=0x52,
+        OI_MSG_TYPE_RGBD_JPEG=0x61
     };
     
     enum OI_MSG_TYPE_MOCAP {
@@ -196,7 +197,8 @@ namespace oi { namespace core {
     typedef struct {
         OI_LEGACY_HEADER header;   // ...
         uint32_t size;             // ...
-        uint8_t * data;
+        uint32_t unused1;             // ...
+        //uint8_t * data;
     } IMG_STRUCT;
     
     typedef struct {

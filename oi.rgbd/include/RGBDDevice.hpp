@@ -46,6 +46,7 @@ namespace oi { namespace core { namespace rgbd {
         virtual float device_depth_scale() = 0;
         virtual std::string device_guid() = 0;
         virtual TJPF color_pixel_format() = 0;
+        virtual bool supports_depth() = 0;
         virtual bool supports_audio() = 0;
         virtual bool supports_body() = 0;
         virtual bool supports_bidx() = 0;
@@ -62,6 +63,8 @@ namespace oi { namespace core { namespace rgbd {
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depthdata, std::chrono::milliseconds timestamp);
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint16_t * depthdata, std::chrono::milliseconds timestamp);
         int QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * depth_any, uint16_t * depth_ushort, std::chrono::milliseconds timestamp);
+        
+        int QueueJPEGFrame(unsigned char * rgbdata, size_t len, std::chrono::milliseconds timestamp);
         
         int QueueHDFrame(unsigned char * rgbdata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp);
         int QueueBodyIndexFrame(unsigned char * bidata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp);
