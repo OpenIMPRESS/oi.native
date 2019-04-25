@@ -26,6 +26,10 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 #include "OIHeaders.hpp"
 
 namespace oi { namespace core { namespace io {
+    
+    
+    
+    
 
 	// TODO: move these to seperate class...
 	class IOMeta {
@@ -223,5 +227,60 @@ namespace oi { namespace core { namespace io {
         else           return t - next_frame_time;
     }
     
+    
+    
+    // TODO:
+    
+    class SessionLibrary;
+    class Session;
+    typedef std::string SessionID;
+    typedef std::string StreamID;
+    
+    typedef struct {
+        StreamID streamID;
+        DataType dataType;
+    } StreamMeta;
+    
+    typedef struct {
+        SessionID sessionID;
+        StreamMeta * streams;
+    } SessionMeta;
 
+    typedef struct {
+        std::string path;
+        StreamMeta * streams;
+    } LibraryMeta;
+
+    class Stream {
+    public:
+        Stream(StreamID streamID);
+        const StreamID streamID;
+    private:
+        friend class Session;
+    };
+    
+    class Session {
+    public:
+        Session(SessionID sessionID);
+        const SessionID sessionID;
+        const Stream * createStream(const StreamID &streamID);
+        const Stream * getStream(const StreamID &streamID) const;
+    private:
+        friend class SessionLibrary;
+        std::map<SessionID, const Stream> Stream;
+    };
+    
+    class SessionLibrary {
+    public:
+        SessionLibrary(std::string libraryFolder);
+        const Session * createSession(const SessionID &sessionID);
+        const Session * getSession(const SessionID &sessionId) const;
+    private:
+        std::map<SessionID, const Session> sessions;
+    };
+    
+    
+    
+    
+    
 } } }
