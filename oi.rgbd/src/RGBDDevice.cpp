@@ -84,7 +84,9 @@ int RGBDDevice::HandleStream() {
     while (true) {
 		fps_counter = 0;
         std::this_thread::sleep_for(_config_send_interval);
-        printf("SENT CONFIG: %d bytes. FPS: %d\n", SendConfig(), fps_counter/(int)(_config_send_interval.count() / 1000));
+		int delta = (_config_send_interval.count() / 1000);
+        printf("SENT CONFIG: %d bytes. FPS: %d AUDIO: %d\n", SendConfig(), fps_counter/delta, _audio_samples_counter/delta);
+		_audio_samples_counter = 0;
         //DataObjectAcquisition<UDPMessageObject> data_in(&cmdqueue, W_TYPE_QUEUED, W_FLOW_NONBLOCKING);
         //data_in.release();
     }
@@ -108,6 +110,7 @@ int RGBDDevice::SendConfig() {
     return data_len;
 }
 
+uint32_t audioSequence = 0;
 int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp) {
     _audio_samples_counter += n_samples;
     
@@ -125,7 +128,7 @@ int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_sam
     audio_header->header.packageType = OI_MSG_TYPE_AUDIO_DEFAULT_FRAME;
     audio_header->header.partsTotal = 1;
     audio_header->header.currentPart = 1;
-    audio_header->header.sequence = _io->next_sequence_id();
+	audio_header->header.sequence = audioSequence++; // _io->next_sequence_id();
     audio_header->header.timestamp = timestamp.count();
     
     audio_header->channels = channels;

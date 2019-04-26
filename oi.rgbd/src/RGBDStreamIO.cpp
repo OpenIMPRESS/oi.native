@@ -59,7 +59,7 @@ RGBDStreamIO::RGBDStreamIO(RGBDStreamerConfig streamer_cfg, asio::io_service& io
 
 	// TODO: max packet size may depend on the device, so this should be more dynamic...
 	//  ... also: rgbd streamer should make their packets fit int o these objects...
-	_frame_pool =		new ObjectPool<UDPMessageObject>(128, MAX_UDP_PACKET_SIZE);
+	_frame_pool =		new ObjectPool<UDPMessageObject>(256, MAX_UDP_PACKET_SIZE);
 	_queue_live =		new WorkerQueue<UDPMessageObject>();
 	_queue_write =		new WorkerQueue<UDPMessageObject>();
 	_commands_queue =	new WorkerQueue<UDPMessageObject>();
@@ -238,7 +238,7 @@ void RGBDStreamerConfig::Parse(int argc, char *argv[]) {
 	std::string serialParam("-sn");
 	std::string pipelineParam("-pp");
 	std::string maxDepthParam("-md");
-
+	std::string enableGUIParam("-g");
 
 	// TODO: add endpoint list parsing!
 	for (int count = 1; count < argc; count += 2) {
@@ -279,6 +279,9 @@ void RGBDStreamerConfig::Parse(int argc, char *argv[]) {
 					printf("ENDPOINT: %s:%s\n", elems[0].c_str(), elems[1].c_str());
 				}
 			}
+		}
+		else if (enableGUIParam.compare(argv[count]) == 0) {
+			this->gui = std::stoi(argv[count + 1]) == 1;
 		}
 		else {
 			std::cout << "Unknown Parameter: " << argv[count] << std::endl;

@@ -62,6 +62,7 @@ namespace oi { namespace core { namespace worker {
         virtual void reset();
         virtual ~DataObject();
         int setData(const void * data, size_t len);
+		int setData(std::string data);
     private:
         ObjectPool<DataObject> * _return_to_pool;
 		std::queue<WorkerQueue<DataObject> *> _workers;

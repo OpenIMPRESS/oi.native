@@ -52,12 +52,10 @@ namespace oi { namespace core {
         printf("+\n+++++++++++++++++++++++++++++++++++++++++++\n\n");
     }
 
-	char oi_path_sep() {
-#ifdef _WIN32
-		return '\\';
-#else
-		return '/';
-#endif
+	std::string oi_cwd() {
+		char cCurrentPath[FILENAME_MAX];
+		if (!oi_currentdir(cCurrentPath, sizeof(cCurrentPath))) return std::string("");
+		return std::string(cCurrentPath);
 	}
 
 	int oi_mkdir(std::string sPath) {

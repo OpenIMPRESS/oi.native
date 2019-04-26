@@ -48,6 +48,7 @@ namespace oi { namespace core { namespace rgbd {
 		std::vector<std::pair<std::string, std::string>> default_endpoints;
 		std::string deviceSerial = ""; //
 		std::string pipeline = "opengl";
+		bool gui = false;
 		float maxDepth = 8.0f;
 	};
 

@@ -36,12 +36,21 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 namespace oi { namespace core {
     
     // Some config parser?
-    
+
+	const std::string oi_path_sep =
+	#ifdef _WIN32
+			"\\";
+	#else
+			"/";
+	#endif
+
+
     std::chrono::milliseconds NOW();
     std::chrono::microseconds NOWu();
     
     void debugMemory(unsigned char * loc, size_t len);
-    
+
+	std::string oi_cwd();
 	int oi_mkdir(std::string path);
-	char oi_path_sep();
+
 } }

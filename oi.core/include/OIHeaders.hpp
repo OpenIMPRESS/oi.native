@@ -314,6 +314,22 @@ namespace oi { namespace core {
 		//OI_META_ENTRY * metaEntries;
 	};
     
+	struct OI_STREAM_SPEC {
+		char streamName[256];
+		uint32_t channelIdx;
+		uint8_t packageFamily;
+		uint8_t packageType;
+		uint8_t unused1;
+		uint8_t unused2;
+	};
+
+	struct OI_SESSION_META_FILE_HEADER {
+		uint64_t sessionTimestamp;
+		uint32_t streamCount;
+		uint32_t unused1; // version?
+		OI_STREAM_SPEC streamHeaders[128];
+	};
+
     /*
     // todo
     typedef struct {

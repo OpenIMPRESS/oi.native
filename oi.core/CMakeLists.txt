@@ -36,7 +36,11 @@ export(TARGETS ${PROJECT_NAME} FILE OICoreConfig.cmake)
 # TESTS
 add_executable(${PROJECT_NAME}.test
     test/${PROJECT_NAME}.test.cpp
-    # ...
 )
-target_link_libraries(${PROJECT_NAME}.test ${PROJECT_NAME})
 add_test(${PROJECT_NAME}.test ${PROJECT_NAME}.test)
+target_link_libraries(${PROJECT_NAME}.test ${PROJECT_NAME})
+add_executable(oi.io.test
+    test/oi.io.test.cpp
+)
+target_link_libraries(oi.io.test ${PROJECT_NAME})
+add_test(oi.io.test oi.io.test)

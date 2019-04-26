@@ -28,8 +28,6 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 namespace oi { namespace core { namespace io {
     
     
-    
-    
 
 	// TODO: move these to seperate class...
 	class IOMeta {
@@ -118,7 +116,7 @@ namespace oi { namespace core { namespace io {
             uint64_t data_start = this->file->tellp();
             {
                 worker::DataObjectAcquisition<DataObjectT> doa(this, worker::W_FLOW_NONBLOCKING);
-                if (!doa.data) return;
+                if (!doa.data) break;
                 doa.data = std::move(this->writeImpl(this->file, std::move(doa.data), timestamp_out));
             }
             uint64_t data_end = this->file->tellp();
@@ -226,11 +224,14 @@ namespace oi { namespace core { namespace io {
         if  (forwards) return next_frame_time - t;
         else           return t - next_frame_time;
     }
-    
-    
-    
-    // TODO:
-    
+
+
+	enum IO_SESSION_MODE {
+		IO_SESSION_MODE_READ    = std::ios::in,
+		IO_SESSION_MODE_NEW     = std::ios::in | std::ios::out,
+		IO_SESSION_MODE_REPLACE = std::ios::in | std::ios::out | std::ios::trunc
+	};
+
     class SessionLibrary;
     class Session;
     typedef std::string SessionID;
@@ -250,36 +251,126 @@ namespace oi { namespace core { namespace io {
         std::string path;
         StreamMeta * streams;
     } LibraryMeta;
-
-    class Stream {
+	
+	template<class DataObjectT>
+    class Stream : public worker::WorkerQueue<DataObjectT>  {
     public:
-        Stream(StreamID streamID);
+		Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session, oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+			std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
+			std::unique_ptr<DataObjectT> (*_write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out))
+			: session(_session), streamID(_streamID), streamIdx(_streamIdx),
+			dataFilePath(session->sessionFolder + oi::core::oi_path_sep  + std::to_string(streamIdx) + "_" + streamID + ".oistream"),
+			read(_read), write(_write), src_pool(src_pool),
+			dataFile(dataFilePath, std::ios::binary | session->mode) {
+			// throw only if exists and not "REPLACE" ... 
+			if (dataFile.fail() || !dataFile.is_open())
+				throw "existing datafile for stream not found.";
+			dataFile.seekg(0, std::ios::beg);
+			if (session->mode == IO_SESSION_MODE_READ) {
+			} else {
+				dataFile.seekp(0, std::ios::beg);
+			}
+		}
+
+		void flush() {
+			// todo: check if writing
+			while (true) {
+				uint64_t timestamp_out = oi::core::NOW().count();
+				uint64_t data_start = dataFile.tellp();
+				{
+					worker::DataObjectAcquisition<DataObjectT> doa(this, worker::W_FLOW_NONBLOCKING);
+					if (!doa.data) break;
+					doa.data = std::move(this->write(&dataFile, std::move(doa.data), timestamp_out));
+				}
+				uint64_t data_end = dataFile.tellp();
+				uint64_t data_len = data_end - data_start;
+				session->writeMetaEntry(streamIdx, timestamp_out, data_start, data_len);
+			}
+			dataFile.flush();
+		}
+
+		virtual ~Stream() {};
         const StreamID streamID;
+		const uint32_t streamIdx;
     private:
-        friend class Session;
+		friend class Session;
+		Session * const session;
+		const std::string dataFilePath;
+		std::fstream dataFile;
+		oi::core::worker::ObjectPool<DataObjectT> * const src_pool;
+		std::unique_ptr<DataObjectT>(*read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len);
+		std::unique_ptr<DataObjectT>(*write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out);
     };
-    
+
     class Session {
     public:
-        Session(SessionID sessionID);
+		Session(SessionID sessionID, IO_SESSION_MODE mode, const std::string filePath);
         const SessionID sessionID;
-        const Stream * createStream(const StreamID &streamID);
-        const Stream * getStream(const StreamID &streamID) const;
+		const IO_SESSION_MODE mode;
+		const std::string sessionFolder;
+		const std::string sessionMetaFilePath;
+
+		template<class DataObjectT>
+		Stream<DataObjectT> * loadStream(const StreamID &streamID, oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+			std::unique_ptr<DataObjectT>  (*read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
+			std::unique_ptr<DataObjectT> (*write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out)) {
+			
+			auto itStreams = streams.find(streamID);
+			if (itStreams != streams.end()) return dynamic_cast<Stream<DataObjectT> *> (itStreams->second);
+
+			// TODO: check if we're supposed to create a new stream...
+			uint32_t streamIdx = metaFileHeader.streamCount;
+			for (uint32_t i = 0; i < metaFileHeader.streamCount; i++) {
+				if (streamID.compare(std::string(metaFileHeader.streamHeaders[i].streamName)) == 0) {
+					streamIdx = i; break;
+				}
+			}
+
+			if (streamIdx == metaFileHeader.streamCount) {
+				metaFileHeader.streamHeaders[streamIdx].channelIdx = streamIdx;
+				metaFileHeader.streamHeaders[streamIdx].packageFamily = 0x00; // TODO
+				metaFileHeader.streamHeaders[streamIdx].packageType = 0x00; // TODO
+				strncpy_s(metaFileHeader.streamHeaders[streamIdx].streamName, 256, streamID.c_str(), streamID.length());
+				metaFileHeader.streamHeaders[streamIdx].streamName[streamID.length()] = '\0';
+				metaFileHeader.streamCount = metaFileHeader.streamCount + 1;
+			}
+
+			Stream<DataObjectT> * res = new Stream<DataObjectT>(streamID, streamIdx, this, src_pool, read, write);
+			streams.insert(std::make_pair(streamID, (Stream<oi::core::worker::DataObject> *) res));
+			return res;
+		}
+
+		template<class DataObjectT>
+		Stream<DataObjectT> * getStream(const StreamID &streamID) const {
+			auto it = streams.find(streamID);
+			if (it == streams.end()) return nullptr;
+			return dynamic_cast<Stream<DataObjectT> *> (it->second);
+		}
+
+		void initWriter();
+		void writeMetaEntry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint64_t data_length);
     private:
+		OI_SESSION_META_FILE_HEADER metaFileHeader;
         friend class SessionLibrary;
-        std::map<SessionID, const Stream> Stream;
+		const int sessionFolderExisted;
+		std::fstream sessionMetaFile;
+		std::chrono::milliseconds t0;
+		void readMeta();
+		void writeMetaHeader();
+		std::map<StreamID, Stream<oi::core::worker::DataObject> *> streams;
+		std::map<uint32_t, std::map<int64_t, std::vector<oi::core::OI_META_ENTRY>>> streamEntries;
     };
     
     class SessionLibrary {
     public:
         SessionLibrary(std::string libraryFolder);
-        const Session * createSession(const SessionID &sessionID);
-        const Session * getSession(const SessionID &sessionId) const;
+        Session * loadSession(const SessionID &sessionID, IO_SESSION_MODE mode);
+		Session * getSession(const SessionID &sessionId) ;
+		const std::string libraryFolder;
     private:
-        std::map<SessionID, const Session> sessions;
+		const int sessionLibraryFolderExisted;
+        std::map<SessionID, Session> sessions;
     };
-    
-    
     
     
     

@@ -192,7 +192,6 @@ public:
             channelA.flush();
             
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            
             {
                 std::string b_data("Hello World B " + std::to_string(i));
                 DataObjectAcquisition<TestObject> doa(pool, worker::W_FLOW_BLOCKING);
