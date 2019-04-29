@@ -255,51 +255,37 @@ namespace oi { namespace core { namespace io {
 	template<class DataObjectT>
     class Stream : public worker::WorkerQueue<DataObjectT>  {
     public:
-		Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session, oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
-			std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
-			std::unique_ptr<DataObjectT> (*_write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out))
-			: session(_session), streamID(_streamID), streamIdx(_streamIdx),
-			dataFilePath(session->sessionFolder + oi::core::oi_path_sep  + std::to_string(streamIdx) + "_" + streamID + ".oistream"),
-			read(_read), write(_write), src_pool(src_pool),
-			dataFile(dataFilePath, std::ios::binary | session->mode) {
-			// throw only if exists and not "REPLACE" ... 
-			if (dataFile.fail() || !dataFile.is_open())
-				throw "existing datafile for stream not found.";
-			dataFile.seekg(0, std::ios::beg);
-			if (session->mode == IO_SESSION_MODE_READ) {
-			} else {
-				dataFile.seekp(0, std::ios::beg);
-			}
-		}
+        
+        Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session,
+               oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+               oi::core::worker::WorkerQueue<DataObjectT> * const out_queue,
+               std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
+               std::unique_ptr<DataObjectT> (*_write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out));
 
-		void flush() {
-			// todo: check if writing
-			while (true) {
-				uint64_t timestamp_out = oi::core::NOW().count();
-				uint64_t data_start = dataFile.tellp();
-				{
-					worker::DataObjectAcquisition<DataObjectT> doa(this, worker::W_FLOW_NONBLOCKING);
-					if (!doa.data) break;
-					doa.data = std::move(this->write(&dataFile, std::move(doa.data), timestamp_out));
-				}
-				uint64_t data_end = dataFile.tellp();
-				uint64_t data_len = data_end - data_start;
-				session->writeMetaEntry(streamIdx, timestamp_out, data_start, data_len);
-			}
-			dataFile.flush();
-		}
+        Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session,
+               oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+               oi::core::worker::WorkerQueue<DataObjectT> * const out_queue,
+               std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len));
+        
+        void flush();
 
 		virtual ~Stream() {};
+        Session * const session;
         const StreamID streamID;
 		const uint32_t streamIdx;
+        
+        int64_t play(int64_t t, bool forwards, bool skip);
+        void setStart();
+        void setEnd();
     private:
 		friend class Session;
-		Session * const session;
 		const std::string dataFilePath;
+        int64_t last_frame_served_time;
 		std::fstream dataFile;
-		oi::core::worker::ObjectPool<DataObjectT> * const src_pool;
 		std::unique_ptr<DataObjectT>(*read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len);
 		std::unique_ptr<DataObjectT>(*write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out);
+        oi::core::worker::ObjectPool<DataObjectT> * const src_pool;
+        oi::core::worker::WorkerQueue<DataObjectT> * const out_queue;
     };
 
     class Session {
@@ -308,15 +294,32 @@ namespace oi { namespace core { namespace io {
         const SessionID sessionID;
 		const IO_SESSION_MODE mode;
 		const std::string sessionFolder;
+        const int sessionFolderExisted;
 		const std::string sessionMetaFilePath;
-
+ 
+        
+        std::vector<oi::core::OI_META_ENTRY> * entries_at_time(uint32_t channel, int64_t time);
+        int64_t prev_entry_time(uint32_t channel, int64_t time); // return the first smaller timestamp
+        int64_t next_entry_time(uint32_t channel, int64_t time); // return the first bigger timestamp
+        
+        
+        int64_t prev_entry_time(int64_t time);
+        int64_t next_entry_time(int64_t time);
+        
+        int64_t play(int64_t t);
+        int64_t play(int64_t t, bool forwards, bool skip);
+        
 		template<class DataObjectT>
-		Stream<DataObjectT> * loadStream(const StreamID &streamID, oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+		Stream<DataObjectT> * loadStream(const StreamID &streamID,
+            oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+            oi::core::worker::WorkerQueue<DataObjectT> * const out_queue,
 			std::unique_ptr<DataObjectT>  (*read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
 			std::unique_ptr<DataObjectT> (*write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out)) {
 			
 			auto itStreams = streams.find(streamID);
-			if (itStreams != streams.end()) return dynamic_cast<Stream<DataObjectT> *> (itStreams->second);
+            if (itStreams != streams.end()) {
+                throw "STREAM ALREADY LOADED";
+            }
 
 			// TODO: check if we're supposed to create a new stream...
 			uint32_t streamIdx = metaFileHeader.streamCount;
@@ -328,31 +331,33 @@ namespace oi { namespace core { namespace io {
 
 			if (streamIdx == metaFileHeader.streamCount) {
 				metaFileHeader.streamHeaders[streamIdx].channelIdx = streamIdx;
-				metaFileHeader.streamHeaders[streamIdx].packageFamily = 0x00; // TODO
-				metaFileHeader.streamHeaders[streamIdx].packageType = 0x00; // TODO
-				strncpy_s(metaFileHeader.streamHeaders[streamIdx].streamName, 256, streamID.c_str(), streamID.length());
+				metaFileHeader.streamHeaders[streamIdx].packageFamily = 0xab; // TODO
+				metaFileHeader.streamHeaders[streamIdx].packageType = 0xcd; // TODO
+				strncpy(metaFileHeader.streamHeaders[streamIdx].streamName, streamID.c_str(), streamID.length());
 				metaFileHeader.streamHeaders[streamIdx].streamName[streamID.length()] = '\0';
-				metaFileHeader.streamCount = metaFileHeader.streamCount + 1;
+				metaFileHeader.streamCount++;
 			}
 
-			Stream<DataObjectT> * res = new Stream<DataObjectT>(streamID, streamIdx, this, src_pool, read, write);
+			Stream<DataObjectT> * res = new Stream<DataObjectT>(streamID, streamIdx, this, src_pool, out_queue, read, write);
 			streams.insert(std::make_pair(streamID, (Stream<oi::core::worker::DataObject> *) res));
 			return res;
 		}
-
-		template<class DataObjectT>
-		Stream<DataObjectT> * getStream(const StreamID &streamID) const {
-			auto it = streams.find(streamID);
-			if (it == streams.end()) return nullptr;
-			return dynamic_cast<Stream<DataObjectT> *> (it->second);
-		}
-
+        
+        template<class DataObjectT>
+        Stream<DataObjectT> * loadStream(const StreamID &streamID,
+                                         oi::core::worker::ObjectPool<DataObjectT> * const src_pool,
+                                         oi::core::worker::WorkerQueue<DataObjectT> * const out_queue,
+                                         std::unique_ptr<DataObjectT>  (*read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len)) {
+            return this->loadStream<DataObjectT>(streamID, src_pool, out_queue, read, nullptr);
+        }
+        
 		void initWriter();
 		void writeMetaEntry(uint32_t channelIdx, uint64_t originalTimestamp, uint64_t data_start, uint64_t data_length);
+        void setStart();
+        void setEnd();
     private:
 		OI_SESSION_META_FILE_HEADER metaFileHeader;
         friend class SessionLibrary;
-		const int sessionFolderExisted;
 		std::fstream sessionMetaFile;
 		std::chrono::milliseconds t0;
 		void readMeta();
@@ -364,14 +369,161 @@ namespace oi { namespace core { namespace io {
     class SessionLibrary {
     public:
         SessionLibrary(std::string libraryFolder);
-        Session * loadSession(const SessionID &sessionID, IO_SESSION_MODE mode);
-		Session * getSession(const SessionID &sessionId) ;
+        std::shared_ptr<Session> loadSession(const SessionID &sessionID, IO_SESSION_MODE mode);
 		const std::string libraryFolder;
     private:
 		const int sessionLibraryFolderExisted;
-        std::map<SessionID, Session> sessions;
+        std::map<SessionID, std::shared_ptr<Session>> sessions;
     };
     
     
+    
+    template<class DataObjectT>
+    Stream<DataObjectT>::Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session,
+        oi::core::worker::ObjectPool<DataObjectT> * const _src_pool,
+        oi::core::worker::WorkerQueue<DataObjectT> * const _out_queue,
+        std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len))
+    : session(_session), streamID(_streamID), streamIdx(_streamIdx),
+    dataFilePath(session->sessionFolder + oi::core::oi_path_sep  + std::to_string(streamIdx) + "_" + streamID + ".oistream"),
+    dataFile(dataFilePath, std::ios::binary | session->mode),
+    read(_read), write(nullptr), src_pool(_src_pool), out_queue(_out_queue)
+    {
+        // TODO: READONLY CONSTRUCTOR
+        if (dataFile.fail() || !dataFile.is_open())
+            throw "existing datafile for stream not found.";
+        dataFile.seekg(0, std::ios::beg);
+        if (session->mode == IO_SESSION_MODE_READ) {
+        } else {
+            dataFile.seekp(0, std::ios::beg);
+        }
+    }
+    
+    template<class DataObjectT>
+    Stream<DataObjectT>::Stream(StreamID _streamID, uint32_t _streamIdx, Session * const _session,
+        oi::core::worker::ObjectPool<DataObjectT> * const _src_pool,
+        oi::core::worker::WorkerQueue<DataObjectT> * const _out_queue,
+        std::unique_ptr<DataObjectT>  (*_read)(std::istream * in,  std::unique_ptr<DataObjectT> data, uint64_t len),
+        std::unique_ptr<DataObjectT> (*_write)(std::ostream * out, std::unique_ptr<DataObjectT> data, uint64_t & timestamp_out))
+    : session(_session), streamID(_streamID), streamIdx(_streamIdx),
+    dataFilePath(session->sessionFolder + oi::core::oi_path_sep  + std::to_string(streamIdx) + "_" + streamID + ".oistream"),
+    dataFile(dataFilePath, std::ios::binary | session->mode),
+    read(_read), write(_write), src_pool(_src_pool), out_queue(_out_queue) {
+        // WRITE CONSTRUCTOR
+        // throw only if exists and not "REPLACE" ...
+        if (dataFile.fail() || !dataFile.is_open())
+            throw "existing datafile for stream not found.";
+        dataFile.seekg(0, std::ios::beg);
+        if (session->mode == IO_SESSION_MODE_READ) {
+        } else {
+            dataFile.seekp(0, std::ios::beg);
+        }
+    }
+    
+    template<class DataObjectT>
+    void Stream<DataObjectT>::flush() {
+        // todo: check if writing
+        while (true) {
+            uint64_t timestamp_out = oi::core::NOW().count();
+            uint64_t data_start = dataFile.tellp();
+            {
+                worker::DataObjectAcquisition<DataObjectT> doa(this, worker::W_FLOW_NONBLOCKING);
+                if (!doa.data) break;
+                doa.data = std::move(this->write(&dataFile, std::move(doa.data), timestamp_out));
+            }
+            uint64_t data_end = dataFile.tellp();
+            uint64_t data_len = data_end - data_start;
+            session->writeMetaEntry(streamIdx, timestamp_out, data_start, data_len);
+        }
+        dataFile.flush();
+    }
+    
+    template<class DataObjectT>
+    int64_t Stream<DataObjectT>::play(int64_t t, bool forwards, bool skip) {
+        
+        // TOWARDS TIME
+        //forwards = t > last_frame_served_time;
+        int64_t closest_prev_frame_time = session->prev_entry_time(this->streamIdx, t);
+        int64_t closest_next_frame_time = session->next_entry_time(this->streamIdx, t);
+        bool at_start = closest_prev_frame_time > t;
+        bool at_end = closest_next_frame_time < t;
+        
+        if (at_end && at_start) {
+            printf("EMPTY META\n");
+            return -1; // EMPTY META
+        }
+        
+        if (forwards && (at_start ||
+                         (last_frame_served_time == closest_prev_frame_time))) {
+            return closest_next_frame_time - t; // will return a negative number if at end
+        }
+        if (!forwards && (at_end ||
+                          (last_frame_served_time == closest_next_frame_time))) {
+            return t - closest_prev_frame_time; // will return a negative number if at start
+        }
+        
+        if (!skip && ((forwards && last_frame_served_time > closest_prev_frame_time) ||
+                      (!forwards && last_frame_served_time < closest_next_frame_time))) {
+            skip = true;
+        }
+        int64_t next_frame_time = 0;
+        if (!skip) {
+            if (forwards) {
+                next_frame_time = session->next_entry_time(this->streamIdx, last_frame_served_time);
+            } else {
+                next_frame_time = session->prev_entry_time(this->streamIdx, last_frame_served_time);
+            }
+        } else {
+            if (forwards) {
+                next_frame_time = closest_prev_frame_time;
+            } else {
+                next_frame_time = closest_next_frame_time;
+            }
+        }
+        
+        do {
+            std::vector<oi::core::OI_META_ENTRY> * list = session->entries_at_time(this->streamIdx, next_frame_time);
+            std::vector<oi::core::OI_META_ENTRY>::iterator it = list->begin();
+            //file->seekg(0, file->end);
+            //uint64_t length = file->tellg();
+            //file->seekg(0, file->beg);
+            //printf("LENGTH: %lld\n", length);
+            while (it != list->end()) {
+                uint64_t reader_pos = dataFile.tellg();
+                if (reader_pos < it->data_start) {
+                    uint64_t skip_bytes = it->data_start - reader_pos;
+                    dataFile.seekg(skip_bytes, std::ios::cur);
+                } else if (reader_pos > it->data_start) {
+                    dataFile.seekg(it->data_start, std::ios::beg);
+                }
+                
+                worker::DataObjectAcquisition<DataObjectT> doa(this->src_pool, worker::W_FLOW_BLOCKING);
+                if (!doa.data) throw "failed to read";
+                doa.data = std::move(this->read(&dataFile, std::move(doa.data), it->data_length));
+                doa.enqueue(out_queue);
+                
+                it++;
+            }
+            last_frame_served_time = next_frame_time;
+            if (forwards) {
+                next_frame_time = session->next_entry_time(this->streamIdx, last_frame_served_time);
+                if (next_frame_time < last_frame_served_time) break;
+            } else {
+                next_frame_time = session->prev_entry_time(this->streamIdx, last_frame_served_time);
+                if (next_frame_time > last_frame_served_time) break;
+            }
+        } while ((forwards && (next_frame_time <= t)) || (!forwards && (next_frame_time >= t)));
+        if  (forwards) return next_frame_time - t;
+        else           return t - next_frame_time;
+    }
+
+    template<class DataObjectT>
+    void Stream<DataObjectT>::setStart() {
+        last_frame_served_time = session->next_entry_time(this->streamIdx, LONG_MIN) - 1;
+    }
+    
+    template<class DataObjectT>
+    void Stream<DataObjectT>::setEnd() {
+        last_frame_served_time = session->prev_entry_time(this->streamIdx, LONG_MAX) + 1;
+    }
     
 } } }

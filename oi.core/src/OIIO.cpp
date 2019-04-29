@@ -20,8 +20,8 @@ along with OpenIMPRESS. If not, see <https://www.gnu.org/licenses/>.
 namespace oi { namespace core { namespace io {
 
 	Session::Session(SessionID sessionID, IO_SESSION_MODE mode, const std::string filePath) :
+        sessionID(sessionID),
 		mode(mode),
-		sessionID(sessionID),
 		sessionFolder(filePath + oi::core::oi_path_sep + sessionID),
 		sessionFolderExisted(oi_mkdir(sessionFolder)),
 		sessionMetaFilePath(sessionFolder + ".oimeta"),
@@ -34,31 +34,32 @@ namespace oi { namespace core { namespace io {
 		metaFileHeader.streamCount = 0;
 		if (sessionMetaFile.fail() || !sessionMetaFile.is_open())
 			throw "existing meta file for session not found.";
-		sessionMetaFile.seekg(0, std::ios::beg);
 		if (mode == IO_SESSION_MODE_READ) {
 			readMeta();
 			sessionMetaFile.close();
-		} else {
-			sessionMetaFile.seekp(0, std::ios::beg);
 		}
 	}
 
 	void Session::readMeta() {
+        sessionMetaFile.seekg(0, std::ios::beg);
+        sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader), sizeof(metaFileHeader));
+        
+        /*
 		sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader.sessionTimestamp), sizeof(metaFileHeader.sessionTimestamp));
 		sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader.streamCount), sizeof(metaFileHeader.streamCount));
 		sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader.unused1), sizeof(metaFileHeader.unused1));
-
-		printf("Session %s t0: %lld streams: %d\n", sessionID.c_str(), metaFileHeader.sessionTimestamp, metaFileHeader.streamCount);
-		if (metaFileHeader.streamCount > 2) { // todo: test
+         */
+		printf("Reading existing session %s t0: %lld streams: %d\n", sessionID.c_str(), metaFileHeader.sessionTimestamp, metaFileHeader.streamCount);
+		if (metaFileHeader.streamCount > 128) {
 			throw "failed reading";
 		}
 
 		for (int i = 0; i < metaFileHeader.streamCount; i++) {
 			//std::string streamName = 
-			sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader.streamHeaders[i]), sizeof(oi::core::OI_META_CHANNEL_HEADER));
-			std::string streamName(metaFileHeader.streamHeaders[i].streamName);
-			printf("\tStream %s idx: %d, family: %d, type: %d\n",
-				streamName.c_str(), metaFileHeader.streamHeaders[i].channelIdx, metaFileHeader.streamHeaders[i].packageFamily, metaFileHeader.streamHeaders[i].packageType);
+			//sessionMetaFile.read(reinterpret_cast<char *>(&metaFileHeader.streamHeaders[i]), sizeof(oi::core::OI_META_CHANNEL_HEADER));
+			//std::string streamName(metaFileHeader.streamHeaders[i].streamName);
+			printf("\tStream |%s| idx: %d, family: %d, type: %d\n",
+				metaFileHeader.streamHeaders[i].streamName, metaFileHeader.streamHeaders[i].channelIdx, metaFileHeader.streamHeaders[i].packageFamily, metaFileHeader.streamHeaders[i].packageType);
 		}
 
 		while (true) {
@@ -67,7 +68,9 @@ namespace oi { namespace core { namespace io {
 			if (sessionMetaFile.eof()) {
 				printf("META EOF\n");
 				break;
-			}
+            } else {
+                printf("DATA ENTRY IN STREAM %d AT: %lld, %lld bytes\n", meta_entry.channelIdx, meta_entry.data_start, meta_entry.data_length);
+            }
 			//if (_meta.find(meta_entry.channelIdx) == _meta.end()) _meta[meta_entry.channelIdx] = 
 			streamEntries[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
 		}
@@ -75,25 +78,22 @@ namespace oi { namespace core { namespace io {
 
 	// 
 	void Session::writeMetaHeader() {
+        sessionMetaFile.seekp(0, std::ios::beg);
 		metaFileHeader.sessionTimestamp = t0.count();
 		metaFileHeader.unused1 = 0;
 
-		/*
-		for (auto const& entry : streamMap) {
-			uint32_t idx = entry.second.channelIdx;
-			if (idx >= metaFileHeader.streamCount) {
-				throw "stream index inconsistent with number of streams";
-			}
-			metaFileHeader.streamHeaders[idx] = entry.second;
-		}*/
-
-		printf("Writing new meta header: t0: %lld, channels: %d\n", metaFileHeader.sessionTimestamp, metaFileHeader.streamCount);
+        printf("Writing new meta header: t0: %lld, streams: %d size: %ld\n", metaFileHeader.sessionTimestamp, metaFileHeader.streamCount, sizeof(metaFileHeader));
+        
+        sessionMetaFile.write((const char*)& metaFileHeader, sizeof(metaFileHeader));
+        
+        /*
 		sessionMetaFile.write((const char*)& metaFileHeader.sessionTimestamp, sizeof(metaFileHeader.sessionTimestamp));
 		sessionMetaFile.write((const char*)& metaFileHeader.streamCount, sizeof(metaFileHeader.streamCount));
 		sessionMetaFile.write((const char*)& metaFileHeader.unused1, sizeof(metaFileHeader.unused1));
 		for (uint32_t i = 0; i < metaFileHeader.streamCount; i++) {
 			sessionMetaFile.write((const char*)& metaFileHeader.streamHeaders[i], sizeof(oi::core::OI_STREAM_SPEC));
-		}
+            printf("\tStream: %d_%s\n",  metaFileHeader.streamHeaders[i].channelIdx, metaFileHeader.streamHeaders[i].streamName);
+		}*/
 		sessionMetaFile.flush();
 	}
 
@@ -140,18 +140,15 @@ namespace oi { namespace core { namespace io {
         for (int i = 0; i < meta_header.channelCount; i++) {
             file->read(reinterpret_cast<char *>(&meta_header.channelHeader[i]), sizeof(oi::core::OI_META_CHANNEL_HEADER));
             printf("\tChannel %d idx: %d, family: %d, type: %d\n",
-                   i, meta_header.channelHeader[i].channelIdx, meta_header.channelHeader[i].packageFamily, meta_header.channelHeader[i].packageType);
-            
+                   i, meta_header.channelHeader[i].channelIdx,
+                   meta_header.channelHeader[i].packageFamily,
+                   meta_header.channelHeader[i].packageType);
         }
         
 		while (true) {
 			OI_META_ENTRY meta_entry;
 			file->read(reinterpret_cast<char *>(&meta_entry), sizeof(meta_entry));
-            if (file->eof())  {
-                printf("META EOF\n");
-                break;
-            }
-			//if (_meta.find(meta_entry.channelIdx) == _meta.end()) _meta[meta_entry.channelIdx] = 
+            if (file->eof()) break;
 			meta[meta_entry.channelIdx][meta_entry.timeOffset].push_back(meta_entry);
 		}
 
@@ -261,7 +258,90 @@ namespace oi { namespace core { namespace io {
 	}
 
 
-
+    int64_t Session::prev_entry_time(uint32_t channel, int64_t time) {
+        auto entry = streamEntries[channel].lower_bound(time);
+        if (entry == streamEntries[channel].begin()) {
+            return time + 1;
+        }
+        
+        //--entry;
+        return std::prev(entry)->first;
+    }
+    
+    int64_t Session::next_entry_time(uint32_t channel, int64_t time) {
+        auto entry = streamEntries[channel].upper_bound(time);
+        if (entry == streamEntries[channel].end()) {
+            return time - 1;
+        }
+        return entry->first;
+    }
+    
+    int64_t Session::prev_entry_time(int64_t time) {
+        int64_t res = time;
+        
+        for (int i = 0; i < metaFileHeader.streamCount; i++) {
+            uint32_t channel = metaFileHeader.streamHeaders[i].channelIdx;
+            auto entry = streamEntries[channel].lower_bound(time);
+            if (entry == streamEntries[channel].begin()) {
+                return time + 1;
+            }
+            if (entry->first < res) res = entry->first;
+        }
+        
+        return res;
+    }
+    
+    int64_t Session::next_entry_time(int64_t time) {
+        int64_t res = time;
+        for (int i = 0; i < metaFileHeader.streamCount; i++) {
+            uint32_t channel = metaFileHeader.streamHeaders[i].channelIdx;
+            auto entry = streamEntries[channel].upper_bound(time);
+            if (entry == streamEntries[channel].end()) {
+                return time - 1;
+            }
+            if (entry->first > res) res = entry->first;
+        }
+        return res;
+    }
+    
+    void Session::setStart() {
+        auto it = streams.begin();
+        while (it != streams.end()) {
+            it->second->setStart();
+            it++;
+        }
+    }
+    
+    void Session::setEnd() {
+        auto it = streams.begin();
+        while (it != streams.end()) {
+            it->second->setEnd();
+            it++;
+        }
+    }
+    
+    
+    int64_t Session::play(int64_t t) {
+        return play(t, true, false);
+    }
+    
+    int64_t Session::play(int64_t t, bool forwards, bool skip) {
+        uint64_t res_delta = -1;
+        auto it = streams.begin();
+        while (it != streams.end()) {
+            uint64_t stream_delta = it->second->play(t, forwards, skip);
+            if (stream_delta >= 0 && stream_delta < res_delta) {
+                res_delta = stream_delta;
+            }
+            it++;
+        }
+        return res_delta;
+    }
+    
+    
+    std::vector<oi::core::OI_META_ENTRY> * Session::entries_at_time(uint32_t channel, int64_t time) {
+        return &(streamEntries[channel][time]);
+    }
 
 	SessionLibrary::SessionLibrary(std::string _libraryFolder) :
 		libraryFolder(_libraryFolder),
@@ -269,18 +349,24 @@ namespace oi { namespace core { namespace io {
 		printf("Session Library Path: %s (existed: %d)\n", libraryFolder.c_str(), sessionLibraryFolderExisted);
 	}
 
-	Session * SessionLibrary::loadSession(const SessionID & sessionID, IO_SESSION_MODE mode)
+	std::shared_ptr<Session> SessionLibrary::loadSession(const SessionID & sessionID, IO_SESSION_MODE mode)
 	{
 		auto it = sessions.find(sessionID);
-		if (it != sessions.end()) return &(it->second);
-		std::pair<std::map<SessionID, Session>::iterator, bool> res = sessions.emplace(sessionID, Session{ sessionID, mode, libraryFolder });
-		return &(res.first->second);
-	}
-
-	Session * SessionLibrary::getSession(const SessionID & sessionID) {
-		auto it = sessions.find(sessionID);
-		if (it != sessions.end()) return &(it->second);
-		return nullptr;
+        if (it != sessions.end()) {
+            if (it->second.use_count() > 1 && mode != IO_SESSION_MODE_READ
+                               && it->second->mode != IO_SESSION_MODE_READ) {
+                // TODO: should we also check if any streams are in use??
+                throw "one or more non-read-only users trying to access same session";
+            } else if (it->second->mode != mode) {
+                sessions.erase(it);
+            } else {
+                return it->second;
+            }
+        }
+        
+		std::pair<std::map<SessionID, std::shared_ptr<Session>>::iterator, bool> res =
+            sessions.emplace(sessionID, std::make_shared<Session>(sessionID, mode, libraryFolder));
+		return res.first->second;
 	}
 
 
