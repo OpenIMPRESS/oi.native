@@ -32,6 +32,7 @@ namespace oi { namespace core { namespace network {
         data_start = 0;
         default_endpoint = true;
         all_endpoints = false;
+		streamID = "";
     }
     
     UDPBase::UDPBase(int listenPort, int sendPort, std::string sendHost, asio::io_service & io_service)

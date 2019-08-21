@@ -26,6 +26,7 @@ namespace oi { namespace core {
 	typedef std::pair<uint8_t, uint8_t> MsgType;
     
     const int MAX_UDP_PACKET_SIZE = 65500;
+    const int MAX_BIG_DATA_SIZE = 10485760;
     
     const unsigned char RGBD_DATA  = 1 << 0;
     const unsigned char AUDIO_DATA = 1 << 1;
@@ -59,7 +60,8 @@ namespace oi { namespace core {
         OI_MSG_TYPE_RGBD_CTRL_RESPONSE_JSON=0x42, // TODO: replace with content format header...
         OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE=0x51,
         OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK=0x52,
-        OI_MSG_TYPE_RGBD_JPEG=0x61
+        OI_MSG_TYPE_RGBD_JPEG=0x61,
+        OI_MSG_TYPE_RGBD_STREAM_STATUS=0x71
     };
     
     enum OI_MSG_TYPE_MOCAP {
@@ -167,6 +169,12 @@ namespace oi { namespace core {
         OI_MESSAGE_FORMAT_JSON = 4
     };
     
+	typedef struct { // DO NOT REARRANGE THESE!
+		uint64_t  timestamp;
+		uint32_t  size;
+		uint32_t  unused1;
+	} BIG_DATA_HEADER;
+
     
     typedef struct { // DO NOT REARRANGE THESE!
         OI_LEGACY_HEADER header;
@@ -204,7 +212,16 @@ namespace oi { namespace core {
         //uint64_t timestamp;
         // followed by BODY_STRUCT * body_data
     } BODY_HEADER_STRUCT;
-    
+
+	typedef struct {
+		OI_LEGACY_HEADER header;
+		uint8_t  replaying = 0;
+		uint8_t  recording = 0;
+		uint8_t  streaming = 0;
+		uint8_t  session_name_length = 0;
+		char session_name[256];
+	} IO_STATE_STRUCT;
+
     typedef struct {
         uint32_t tracking_id;        // 000-003
         uint8_t left_hand_state;     // 004
@@ -290,33 +307,16 @@ namespace oi { namespace core {
         }
     };
 
-	// TODO: add friendly name?
-	struct OI_META_CHANNEL_HEADER {
-		uint32_t channelIdx;
-		uint8_t packageFamily;
-		uint8_t packageType;
-		uint8_t unused1;
-		uint8_t unused2;
-	};
-
 	struct OI_META_ENTRY {
-		uint32_t channelIdx;
+		uint32_t streamIdx;
 		int64_t timeOffset;
 		uint64_t data_start;
 		uint64_t data_length;
 	};
-
-	struct OI_META_FILE_HEADER {
-		uint64_t sessionTimestamp;
-		uint32_t channelCount;
-		uint32_t unused1; // version?
-		OI_META_CHANNEL_HEADER * channelHeader;
-		//OI_META_ENTRY * metaEntries;
-	};
     
 	struct OI_STREAM_SPEC {
 		char streamName[256];
-		uint32_t channelIdx;
+		uint32_t streamIdx;
 		uint8_t packageFamily;
 		uint8_t packageType;
 		uint8_t unused1;

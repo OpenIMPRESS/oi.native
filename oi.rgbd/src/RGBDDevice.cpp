@@ -63,7 +63,7 @@ RGBDDevice::RGBDDevice(RGBDDeviceInterface& device, RGBDStreamIO& io) {
         _stream_config.dataFlags |= AUDIO_DATA;
     }
     
-    if (_device->supports_audio()) {
+    if (_device->supports_body()) {
         _stream_config.dataFlags |= BODY_DATA;
     }
     
@@ -106,11 +106,12 @@ int RGBDDevice::SendConfig() {
     int data_len = sizeof(CONFIG_STRUCT);
     memcpy(&(data_out.data->buffer[0]), (unsigned char *) &_stream_config, data_len);
     data_out.data->data_end = data_len;
-    data_out.enqueue(_io->live_frame_queue());
+	data_out.data->default_endpoint = false;
+	data_out.data->all_endpoints = true;
+    data_out.enqueue(_io->direct_send_queue());
     return data_len;
 }
 
-uint32_t audioSequence = 0;
 int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_samples, uint16_t freq, uint16_t channels, std::chrono::milliseconds timestamp) {
     _audio_samples_counter += n_samples;
     
@@ -128,7 +129,7 @@ int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_sam
     audio_header->header.packageType = OI_MSG_TYPE_AUDIO_DEFAULT_FRAME;
     audio_header->header.partsTotal = 1;
     audio_header->header.currentPart = 1;
-	audio_header->header.sequence = audioSequence++; // _io->next_sequence_id();
+	audio_header->header.sequence = _io->stream_sequence[STREAM_ID_AUDIO]++;
     audio_header->header.timestamp = timestamp.count();
     
     audio_header->channels = channels;
@@ -152,6 +153,7 @@ int RGBDDevice::QueueAudioFrame(uint32_t sequence, float * samples, size_t n_sam
     
     size_t data_len = header_size + writeOffset;
     data_out.data->data_end = data_len;
+	data_out.data->streamID = STREAM_ID_AUDIO;
     data_out.enqueue(_io->live_frame_queue());
     return data_len;
 }
@@ -171,7 +173,7 @@ int RGBDDevice::QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies
 	body_header->header.packageType = OI_MSG_TYPE_MOCAP_BODY_FRAME_KINECTV2;
 	body_header->header.partsTotal = 1;
 	body_header->header.currentPart = 1;
-	body_header->header.sequence = _io->next_sequence_id();
+	body_header->header.sequence = _io->stream_sequence[STREAM_ID_SKELETON]++;
 	body_header->n_bodies = n_bodies;
 	uint8_t * data = &(data_out.data->buffer[header_size]);
 	size_t data_size = sizeof(BODY_STRUCT) * n_bodies;
@@ -180,6 +182,7 @@ int RGBDDevice::QueueBodyFrame(oi::core::BODY_STRUCT * bodies, uint16_t n_bodies
 	int d_data_len = header_size + data_size;
 	data_out.data->data_end = d_data_len;
 	res += d_data_len;
+	data_out.data->streamID = STREAM_ID_SKELETON;
 	data_out.enqueue(_io->live_frame_queue());
 	return res;
 }
@@ -222,7 +225,7 @@ int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * d
         rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_COLOR;
         rgbd_header->header.partsTotal = 1;
         rgbd_header->header.currentPart = 1;
-        rgbd_header->header.sequence = _io->next_sequence_id();
+		rgbd_header->header.sequence = _io->stream_sequence[STREAM_ID_RGBD]++;
         rgbd_header->header.timestamp = timestamp.count();
         rgbd_header->startRow = (uint16_t) 0;             // ... we can fit the whole...
         rgbd_header->endRow = (uint16_t) frame_height; //...RGB data in one packet
@@ -240,6 +243,7 @@ int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * d
         int c_data_len = header_size + _jpegSize;
         data_out.data->data_end = c_data_len;
         res += c_data_len;
+		data_out.data->streamID = STREAM_ID_RGBD;
         data_out.enqueue(_io->live_frame_queue());
         tjDestroy(_jpegCompressor);
     }
@@ -264,7 +268,7 @@ int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * d
         rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_DEPTH_BLOCK;
         rgbd_header->header.partsTotal = 1;
         rgbd_header->header.currentPart = 1;
-        rgbd_header->header.sequence = _io->next_sequence_id();
+		rgbd_header->header.sequence = _io->stream_sequence[STREAM_ID_RGBD]++;
         rgbd_header->header.timestamp = timestamp.count();
         rgbd_header->startRow = startRow;             // ... we can fit the whole...
         rgbd_header->endRow = endRow; //...RGB data in one packet
@@ -296,6 +300,7 @@ int RGBDDevice::QueueRGBDFrame(uint64_t sequence, uint8_t * rgbdata, uint8_t * d
         int d_data_len = writeOffset;
         data_out.data->data_end = d_data_len;
         res += d_data_len;
+		data_out.data->streamID = STREAM_ID_RGBD;
         data_out.enqueue(_io->live_frame_queue());
     }
     
@@ -312,46 +317,80 @@ int RGBDDevice::QueueJPEGFrame(unsigned char * rgbdata, size_t len, std::chrono:
     img_header->header.packageType = OI_MSG_TYPE_RGBD_JPEG;
     img_header->header.partsTotal = 1;
     img_header->header.currentPart = 1;
-    img_header->header.sequence = _io->next_sequence_id();
+	img_header->header.sequence = _io->stream_sequence[STREAM_ID_SD]++;
     img_header->header.timestamp = timestamp.count();
     img_header->size = len;//(uint32_t) len;
     //img_header->data = new uint8_t[len];
     memcpy(&(data_out.data->buffer[sizeof(IMG_STRUCT)]), rgbdata, len);
     data_out.data->data_start = 0;
     data_out.data->data_end = sizeof(IMG_STRUCT) + len;
+	data_out.data->streamID = STREAM_ID_SD;
     data_out.enqueue(_io->live_frame_queue());
     return data_out.data->data_end;
 }
 
 int RGBDDevice::QueueHDFrame(unsigned char * rgbdata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
-    DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
-    if (!data_out.data) throw "\nERROR: No free buffers available";
-    IMG_STRUCT * img_header = (IMG_STRUCT *) &(data_out.data->buffer[0]);
-    static size_t header_size = sizeof(IMG_STRUCT);
-    img_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
-    img_header->header.packageType = OI_MSG_TYPE_RGBD_JPEG;
-    img_header->header.partsTotal = 1;
-    img_header->header.currentPart = 1;
-    img_header->header.sequence = _io->next_sequence_id();
-    img_header->header.timestamp = timestamp.count();
-    // COMPRESS COLOR
-    long unsigned int _jpegSize = MAX_UDP_PACKET_SIZE - header_size;
-    unsigned char* _compressedImage = (unsigned char*) &(data_out.data->buffer[header_size]);
-    tjhandle _jpegCompressor = tjInitCompress();
-    tjCompress2(_jpegCompressor, rgbdata, width, 0, height, pix_fmt,
-                &_compressedImage, &_jpegSize, TJSAMP_444, 30,
-                TJFLAG_FASTDCT);
-    if (_jpegSize >= MAX_UDP_PACKET_SIZE) {
-        printf("SKIPPING BIG JPEG: %ld\n", _jpegSize);
-        data_out.release();
-        return 0;
-    }
-    uint64_t c_data_len = header_size + _jpegSize;
-    img_header->size = (uint32_t) _jpegSize;
-    data_out.data->data_start = 0;
-    data_out.data->data_end = c_data_len;
-    data_out.enqueue(_io->live_frame_queue());
-    return c_data_len;
+	int res = 0;
+	tjhandle _jpegCompressor = tjInitCompress();
+	{	// Send a preview frame...
+		DataObjectAcquisition<UDPMessageObject> data_out(_io->empty_frame(), W_FLOW_BLOCKING);
+		if (!data_out.data) {
+			printf("BUFFER FULL (QueueHDFrame SD)\n");
+			return 0;
+		}
+		IMG_STRUCT * img_header = (IMG_STRUCT *) &(data_out.data->buffer[0]);
+		static size_t header_size = sizeof(IMG_STRUCT);
+		img_header->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
+		img_header->header.packageType = OI_MSG_TYPE_RGBD_JPEG;
+		img_header->header.partsTotal = 1;
+		img_header->header.currentPart = 1;
+		img_header->header.sequence = _io->stream_sequence[STREAM_ID_SD]++;
+		img_header->header.timestamp = timestamp.count();
+		// COMPRESS COLOR
+		long unsigned int _jpegSize = MAX_UDP_PACKET_SIZE - header_size;
+		unsigned char* _compressedImage = (unsigned char*) &(data_out.data->buffer[header_size]);
+		//tjhandle _jpegCompressor = tjInitCompress();
+		tjCompress2(_jpegCompressor, rgbdata, width, 0, height, pix_fmt,
+					&_compressedImage, &_jpegSize, TJSAMP_GRAY, 10,
+					TJFLAG_FASTDCT);
+		if (_jpegSize >= MAX_UDP_PACKET_SIZE) {
+			printf("SKIPPING BIG JPEG: %ld\n", _jpegSize);
+			data_out.release();
+		} else {
+			uint64_t c_data_len = header_size + _jpegSize;
+			img_header->size = (uint32_t) _jpegSize;
+			data_out.data->data_start = 0;
+			data_out.data->data_end = c_data_len;
+			data_out.data->streamID = STREAM_ID_SD;
+			data_out.enqueue(_io->live_frame_queue());
+			res += c_data_len;
+		}
+	} {	// Store the HD frame to disk...
+		DataObjectAcquisition<BigDataObject> big_data_out(_io->empty_big_data(), W_FLOW_BLOCKING);
+		if (!big_data_out.data) {
+			printf("BUFFER FULL (QueueHDFrame HD)\n");
+			return 0;
+		}
+		static size_t header_size = sizeof(BIG_DATA_HEADER);
+		big_data_out.data->data_start = 0;
+		long unsigned int _jpegSizeBig = MAX_BIG_DATA_SIZE - big_data_out.data->data_start;
+		unsigned char* _compressedImage = (unsigned char*) &(big_data_out.data->buffer[header_size]);
+		tjCompress2(_jpegCompressor, rgbdata, width, 0, height, pix_fmt,
+			&_compressedImage, &_jpegSizeBig, TJSAMP_444, 80,
+			TJFLAG_FASTDCT);
+		if (_jpegSizeBig >= MAX_BIG_DATA_SIZE) {
+			printf("SKIPPING BIG JPEG (HD!): %ld\n", _jpegSizeBig);
+			big_data_out.release();
+		} else {
+			BIG_DATA_HEADER * header = (BIG_DATA_HEADER *) &(big_data_out.data->buffer[big_data_out.data->data_start]);
+			big_data_out.data->data_end = big_data_out.data->data_start + header_size + _jpegSizeBig;
+			big_data_out.data->streamID = STREAM_ID_HD;
+			header->size = (uint32_t)_jpegSizeBig;
+			header->timestamp = timestamp.count();
+			big_data_out.enqueue(_io->big_data_queue());
+		}
+	}
+    return res;
 }
 
 int RGBDDevice::QueueBodyIndexFrame(unsigned char * bidata, int width, int height, TJPF pix_fmt, std::chrono::milliseconds timestamp) {
@@ -373,7 +412,7 @@ int RGBDDevice::QueueBodyIndexFrame(unsigned char * bidata, int width, int heigh
 	rgbd_header->header.packageType = OI_MSG_TYPE_RGBD_BODY_ID_TEXTURE_BLOCK; // _BLOCK?, even though its a whole one?
 	rgbd_header->header.partsTotal = 1;
 	rgbd_header->header.currentPart = 1;
-	rgbd_header->header.sequence = _io->next_sequence_id();
+	rgbd_header->header.sequence = _io->stream_sequence[STREAM_ID_BIDX]++;
 	rgbd_header->header.timestamp = timestamp.count();
 	rgbd_header->delta_t = deltaValue;
 	rgbd_header->startRow = 0;
@@ -391,6 +430,7 @@ int RGBDDevice::QueueBodyIndexFrame(unsigned char * bidata, int width, int heigh
 	int c_data_len = header_size + _jpegSize;
 	data_out.data->data_end = c_data_len;
 	res += c_data_len;
+	data_out.data->streamID = STREAM_ID_BIDX;
 	data_out.enqueue(_io->live_frame_queue());
 	tjDestroy(_jpegCompressor);
 

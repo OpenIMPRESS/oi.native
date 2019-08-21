@@ -24,21 +24,15 @@ using namespace oi::core::worker;
 using namespace oi::core::network;
 using namespace nlohmann;
 
-template<>
-std::unique_ptr<UDPMessageObject> IOChannel<UDPMessageObject>::readImpl(std::istream * in, uint64_t len, std::unique_ptr<UDPMessageObject> data) {
-	data->data_start = 0;
-	data->data_end = len;
-	in->read((char*) & (data->buffer[0]), len);
-	return data;
-}
-//oi::core::worker::WorkerQueue<TestObject>* out_queue, oi::core::worker::ObjectPool<TestObject> * pool
+RGBDStreamIO* RGBDStreamIO::_instance = nullptr;
 
-template<>
-std::unique_ptr<UDPMessageObject> IOChannel<UDPMessageObject>::writeImpl(std::ostream * out, std::unique_ptr<UDPMessageObject> data, uint64_t & timestamp_out) {
-	uint64_t data_len = data->data_end - data->data_start;
-	timestamp_out = NOW().count(); // todo: read from header or add timestamp attribute to UDPMessageObject
-	out->write((const char*) &(data->buffer[data->data_start]), data_len);
-	return data;
+BigDataObject::BigDataObject(size_t buffer_size, ObjectPool<BigDataObject> * _pool) :
+	DataObject(buffer_size, (ObjectPool<DataObject>*) _pool) {}
+BigDataObject::~BigDataObject() {};
+void BigDataObject::reset() {
+	data_end = 0;
+	data_start = 0;
+	streamID = "";
 }
 
 
@@ -46,21 +40,44 @@ bool ScheduledRGBDCommand::operator()(ScheduledRGBDCommand left, ScheduledRGBDCo
 	return left.time > right.time;
 }
 
+ObjectPool<BigDataObject>* oi::core::rgbd::RGBDStreamIO::empty_big_data() {
+	return _big_pool;
+}
+
 ObjectPool<oi::core::network::UDPMessageObject>* oi::core::rgbd::RGBDStreamIO::empty_frame() {
 	return _frame_pool;
+}
+
+WorkerQueue<oi::core::network::UDPMessageObject>* oi::core::rgbd::RGBDStreamIO::replay_frame_queue() {
+	return _queue_replay;
+}
+
+WorkerQueue<BigDataObject>* oi::core::rgbd::RGBDStreamIO::big_data_queue() {
+	return _big_queue;
 }
 
 WorkerQueue<oi::core::network::UDPMessageObject>* oi::core::rgbd::RGBDStreamIO::live_frame_queue() {
 	return _queue_live;
 }
 
-RGBDStreamIO::RGBDStreamIO(RGBDStreamerConfig streamer_cfg, asio::io_service& io_service) {
+WorkerQueue<oi::core::network::UDPMessageObject>* oi::core::rgbd::RGBDStreamIO::direct_send_queue() {
+	return _udpc->send_queue();
+}
+
+
+
+RGBDStreamIO::RGBDStreamIO(RGBDStreamerConfig streamer_cfg, asio::io_service& io_service, std::string lib_path)
+	: sessionLibrary(lib_path), intervalIOPublish(500) {
+	RGBDStreamIO::_instance = this;
 	this->_rgbdstreamer_config = streamer_cfg;
 
 	// TODO: max packet size may depend on the device, so this should be more dynamic...
 	//  ... also: rgbd streamer should make their packets fit int o these objects...
 	_frame_pool =		new ObjectPool<UDPMessageObject>(256, MAX_UDP_PACKET_SIZE);
+	_big_pool =			new ObjectPool<BigDataObject>(16, MAX_BIG_DATA_SIZE + sizeof(BIG_DATA_HEADER)); // 10Mb frames...
+	_big_queue =		new WorkerQueue<BigDataObject>();
 	_queue_live =		new WorkerQueue<UDPMessageObject>();
+	_queue_replay =		new WorkerQueue<UDPMessageObject>();
 	_queue_write =		new WorkerQueue<UDPMessageObject>();
 	_commands_queue =	new WorkerQueue<UDPMessageObject>();
 
@@ -81,16 +98,186 @@ RGBDStreamIO::RGBDStreamIO(RGBDStreamerConfig streamer_cfg, asio::io_service& io
 	_write_thread =		new std::thread(&RGBDStreamIO::Writer,		this);
 	_read_thread =		new std::thread(&RGBDStreamIO::Reader,		this);
 
+	streaming = true;
+	recording = false;
+	replaying = false;
 }
 
 RGBDStreamerConfig oi::core::rgbd::RGBDStreamIO::get_stream_config() {
 	return _rgbdstreamer_config;
 }
 
+RGBDStreamIO * RGBDStreamIO::getInstance() {
+	return _instance;
+};
+
 uint32_t oi::core::rgbd::RGBDStreamIO::next_sequence_id() {
 	return _udpc->next_sequence_id();
 }
 
+void oi::core::rgbd::RGBDStreamIO::startStreaming() {
+	if (replaying) {
+		stopReplaying();
+
+		for (auto & stream : stream_sequence_replay) {
+			stream_sequence[stream.first] = std::max(stream_sequence_replay[stream.first], stream_sequence[stream.first]);
+		}
+	}
+	streaming = true;
+}
+
+void oi::core::rgbd::RGBDStreamIO::stopStreaming() {
+	streaming = false;
+	printf("STOP STREAMING\n");
+}
+
+void oi::core::rgbd::RGBDStreamIO::startRecording(std::string sessionID) {
+	if (recording) {
+		printf("WARN: WAS RECORDING. STOPING CURRENT RECORDING FIRST!\n");
+		stopRecording();
+	}
+	
+	std::unique_lock<std::mutex> lk(_m_session);
+	session = sessionLibrary.loadSession(sessionID, IO_SESSION_MODE_REPLACE);
+	// todo: check for each stream if the device supports it?
+	rgbdstreams[STREAM_ID_RGBD] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_RGBD, empty_frame(), live_frame_queue(), UDPIO::read, UDPIO::write);
+	rgbdstreams[STREAM_ID_SD] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_SD, empty_frame(), live_frame_queue(), UDPIO::read, UDPIO::write);
+	rgbdstreams[STREAM_ID_BIDX] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_BIDX, empty_frame(), live_frame_queue(), UDPIO::read, UDPIO::write);
+	rgbdstreams[STREAM_ID_AUDIO] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_AUDIO, empty_frame(), live_frame_queue(), UDPIO::read, UDPIO::write);
+	rgbdstreams[STREAM_ID_SKELETON] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_SKELETON, empty_frame(), live_frame_queue(), UDPIO::read, UDPIO::write);
+	bigstreams[STREAM_ID_HD] = session->loadStream<BigDataObject>(
+		STREAM_ID_HD, empty_big_data(), big_data_queue(), UDPIO::readBig, UDPIO::writeBig);
+	session->initWriter();
+
+	recording = true;
+	printf("START RECORD %s\n", sessionID.c_str());
+}
+
+
+int state_sequence = 0;
+void oi::core::rgbd::RGBDStreamIO::publishIOState() {
+	DataObjectAcquisition<UDPMessageObject> data_out(empty_frame(), W_FLOW_BLOCKING);
+	if (!data_out.data) {
+		std::cout << "\nERROR: No free buffers available (publishIOState)" << std::endl;
+		return;
+	}
+	data_out.data->data_start = 0;
+	data_out.data->data_end = sizeof(IO_STATE_STRUCT);
+	data_out.data->default_endpoint = false;
+	data_out.data->all_endpoints = true;
+	IO_STATE_STRUCT * io_state = (IO_STATE_STRUCT *) &(data_out.data->buffer[data_out.data->data_start]);
+	lastIOPublish = NOW();
+	io_state->header.timestamp = lastIOPublish.count();
+	io_state->header.packageFamily = OI_LEGACY_MSG_FAMILY_RGBD;
+	io_state->header.packageType = OI_MSG_TYPE_RGBD_STREAM_STATUS;
+	io_state->header.partsTotal = 1;
+	io_state->header.currentPart = 1;
+	io_state->header.sequence = state_sequence++;
+
+	std::unique_lock<std::mutex> lk(_m_session);
+	io_state->recording = recording;
+	io_state->streaming = streaming;
+	io_state->replaying = replaying;
+	if (session) {
+		io_state->session_name_length = session->sessionID.length();
+		memcpy(io_state->session_name, session->sessionID.c_str(), session->sessionID.length());
+	} else {
+		io_state->session_name_length = 0;
+	}
+	data_out.enqueue(_udpc->send_queue());
+}
+
+void oi::core::rgbd::RGBDStreamIO::stopRecording() {
+	if (!recording) {
+		printf("WARN: NOT CURRENTLY RECORDING!\n");
+		return;
+	}
+
+	std::unique_lock<std::mutex> lk(_m_session);
+	for (auto & x : rgbdstreams) {
+		if (x.second) {
+			x.second->notify_all();
+			x.second->close();
+			x.second.reset();
+		}
+	}
+
+	for (auto & x : bigstreams) {
+		if (x.second) {
+			x.second->notify_all();
+			x.second->close();
+			x.second.reset();
+		}
+	}
+
+	session->endSession();
+	session.reset();
+
+	recording = false;
+	printf("STOP RECORDING\n");
+}
+
+void oi::core::rgbd::RGBDStreamIO::startReplaying(std::string sessionID) {
+	printf("START REPLAY %s\n", sessionID.c_str());
+	if (streaming) {
+		stopStreaming();
+	}
+
+	if (recording) {
+		// TODO: can we work out simultaneous recording and replaying?
+		stopRecording();
+	}
+
+	if (replaying) {
+		stopReplaying();
+	}
+
+	for (auto & stream : stream_sequence_replay) {
+		stream_sequence_replay[stream.first] = std::max(stream_sequence_replay[stream.first], stream_sequence[stream.first]);
+	}
+
+	std::unique_lock<std::mutex> lk(_m_session);
+	session = sessionLibrary.loadSession(sessionID, IO_SESSION_MODE_READ);
+	// todo: check for each stream if the device supports it?
+	rgbdstreams[STREAM_ID_RGBD] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_RGBD, empty_frame(), replay_frame_queue(), UDPIO::read);
+	rgbdstreams[STREAM_ID_SD] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_SD, empty_frame(), replay_frame_queue(), UDPIO::read);
+	rgbdstreams[STREAM_ID_BIDX] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_BIDX, empty_frame(), replay_frame_queue(), UDPIO::read);
+	rgbdstreams[STREAM_ID_AUDIO] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_AUDIO, empty_frame(), replay_frame_queue(), UDPIO::read);
+	rgbdstreams[STREAM_ID_SKELETON] = session->loadStream<oi::core::network::UDPMessageObject>(
+		STREAM_ID_SKELETON, empty_frame(), replay_frame_queue(), UDPIO::read);
+
+	replaying = true;
+	_replay_thread = new std::thread(&RGBDStreamIO::Replay, this, false, true, true);
+}
+
+void oi::core::rgbd::RGBDStreamIO::stopReplaying() {
+	if (!replaying) {
+		printf("WARN: WASN'T REPLAYING\n");
+		return;
+	}
+
+	{
+		std::unique_lock<std::mutex> lk(_m_session);
+		if (session) session.reset();
+	}
+	replaying = false;
+
+	if (_replay_thread != nullptr && _replay_thread->joinable()) {
+		printf("TRYING TO JOIN PREVIOUS REPLAY THREAD\n");
+		_replay_thread->join();
+	}
+
+	printf("STOP REPLAY\n");
+}
 
 int oi::core::rgbd::RGBDStreamIO::Commands() {
 	while (true) {
@@ -145,61 +332,126 @@ int32_t oi::core::rgbd::RGBDStreamIO::HandleScheduledCommands() {
 void oi::core::rgbd::RGBDStreamIO::HandleCommand(json cmd) {
 	std::chrono::milliseconds t = NOW();
 	printf("Executing command: %s (t: %llu)\n", cmd.dump(-1).c_str(), t.count());
+	if (cmd.find("val") == cmd.end() || !cmd["val"].is_string()) return;
+	std::string action = cmd["cmd"].get<std::string>();
+	std::string val = cmd["val"].get<std::string>();
+
+	if (action.compare("record") == 0) {
+		if (val.compare("startrec") == 0) {
+			startRecording(cmd["file"].get<std::string>());
+		} else if (val.compare("stoprec") == 0) {
+			stopRecording();
+		} else if (val.compare("startplay") == 0) {
+			startReplaying(cmd["file"].get<std::string>());
+		} else if (val.compare("stopplay") == 0) {
+			stopReplaying();
+		} else if (val.compare("startstream") == 0) {
+			startStreaming();
+		} else if (val.compare("stopstream") == 0) {
+			stopStreaming();
+		}
+	}
 }
 
 int oi::core::rgbd::RGBDStreamIO::Live() {
 	while (true) {
 		// Send data from our queue
-		worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_live, worker::W_FLOW_BLOCKING);
-		if (!doa_s.data) continue;
+		{
+			worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_live, worker::W_FLOW_BLOCKING);
+			if (!doa_s.data) continue;
 
-		doa_s.data->default_endpoint = false;
-		doa_s.data->all_endpoints = true;
-		doa_s.enqueue(_udpc->send_queue());
-		// if (recording) ...
-		doa_s.enqueue(_queue_write);
+			doa_s.data->default_endpoint = false;
+			doa_s.data->all_endpoints = true;
+
+			if (streaming) {
+				doa_s.enqueue(_udpc->send_queue());
+			}
+
+			if (recording) {
+				doa_s.enqueue(_queue_write);
+			}
+		}
+
+		if (NOW() - lastIOPublish > intervalIOPublish) {
+			publishIOState();
+		}
 	}
 
 	_queue_live->notify_all();
 	printf("END Live");
 	return 0;
 }
-int oi::core::rgbd::RGBDStreamIO::RecordReplay() {
-	/* TODO: ...
-	char cCurrentPath[FILENAME_MAX];
-	if (!oi_currentdir(cCurrentPath, sizeof(cCurrentPath))) return errno;
-	std::string path(cCurrentPath);
-	std::string dataPath = path + oi::core::oi_path_sep() + "data";
 
-	std::vector<MsgType> channels;
-	MsgType channelA_type = std::make_pair(0x00, 0x00);
-	MsgType channelB_type = std::make_pair(0x00, 0x01);
-	channels.push_back(channelA_type);
-	channels.push_back(channelB_type);
+int oi::core::rgbd::RGBDStreamIO::Replay(bool skip, bool direction, bool loop) {
+	// TODO: replay speed?
 
-	oi::core::io::IOMeta meta(path, "iotest", channels);
-	oi::core::io::IOChannel<UDPMessageObject> channelA(channelA_type, &meta, _frame_pool);
-	oi::core::io::IOChannel<UDPMessageObject> channelB(channelB_type, &meta, _frame_pool);
-	*/
+	printf("========= REPLAYER START\n");
+	do {
+		{	std::unique_lock<std::mutex> lk(_m_session);
+			if (!session) break;
+			session->setStart(); // TODO: direction
+		}
+		std::chrono::milliseconds t0 = NOW();
+		int64_t deltaNext = 0;
+		while (deltaNext >= 0 && replaying) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(deltaNext));
+			{	std::unique_lock<std::mutex> lk(_m_session);
+				if (!session) break;
+				deltaNext = session->play((NOW() - t0).count());
+				// TODO: direction, skip
+			}
+		}
+	} while (loop && replaying);
+	printf("========= REPLAYER END\n");
 	return 0;
 }
 
 int oi::core::rgbd::RGBDStreamIO::Writer() {
 
-
 	while (true) {
-		worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_write, worker::W_FLOW_BLOCKING);
-		if (!doa_s.data) continue;
+		{
+			worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_write, 20);
+			if (doa_s.data) {
+				for (auto & x : rgbdstreams) {
+					if (x.second && doa_s.data->streamID.compare(x.first) == 0) {
+						doa_s.enqueue(x.second.get());
+						x.second->flush();
+					}
+				}
+			}
+		}
+		
+		{
+			worker::DataObjectAcquisition<BigDataObject> big_doa_s(_big_queue, worker::W_FLOW_NONBLOCKING);
+			if (big_doa_s.data && recording) { // todo: checking if recording should be somewhere else
+				for (auto & x : bigstreams) {
+					if (x.second && big_doa_s.data->streamID.compare(x.first) == 0) {
+						big_doa_s.enqueue(x.second.get());
+						x.second->flush();
+					}
+				}
+			}
+		}
 	}
-
+	_big_queue->notify_all();
 	_queue_write->notify_all();
 	printf("END Writer\n");
 	return 0;
 }
 
 int oi::core::rgbd::RGBDStreamIO::Reader() {
+	while (true) {
+		worker::DataObjectAcquisition<UDPMessageObject> doa_s(_queue_replay, worker::W_FLOW_BLOCKING);
+		if (!doa_s.data) continue;
+		doa_s.data->default_endpoint = false;
+		doa_s.data->all_endpoints = true;
 
+		if (replaying) {
+			doa_s.enqueue(_udpc->send_queue());
+		}
+	}
 
+	_queue_live->notify_all();
 	printf("END Reader\n");
 	return 0;
 }

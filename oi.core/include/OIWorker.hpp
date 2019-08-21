@@ -184,7 +184,10 @@ namespace oi { namespace core { namespace worker {
     
     template <class DataObjectT>
     void ObjectPool<DataObjectT>::_return(std::unique_ptr<DataObjectT> p) {
-        if (!p) throw OIError("Returned NULL.");
+        if (!p) {//throw OIError("Returned NULL.");
+			printf("NULL ENQUEUED");
+			return;
+		}
         std::unique_lock<std::mutex> lk(_m_unused);
 		p->reset();
 		p->_workers = {};
@@ -232,8 +235,11 @@ namespace oi { namespace core { namespace worker {
     }
     
     template <class DataObjectT>
-    void WorkerQueue<DataObjectT>::_enqueue(std::unique_ptr<DataObjectT> p) {
-        if (!p) throw OIError("Returned NULL.");
+	void WorkerQueue<DataObjectT>::_enqueue(std::unique_ptr<DataObjectT> p) {
+		if (!p) {//throw OIError("Returned NULL.");
+			printf("NULL ENQUEUED");
+			return;
+		} 
         std::unique_lock<std::mutex> lk(_m_ready);
         _queue_ready.push(std::move(p));
         have_queued_cv.notify_one();

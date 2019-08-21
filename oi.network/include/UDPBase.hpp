@@ -36,6 +36,7 @@ namespace oi { namespace core { namespace network {
         virtual ~UDPMessageObject();
         bool default_endpoint = true;
         bool all_endpoints = false;
+		std::string streamID = "";
         void reset();
     };
     
